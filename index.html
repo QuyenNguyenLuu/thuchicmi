@@ -15,21 +15,18 @@
    - Để trống apiKey  → app chạy chế độ LƯU MÁY (localStorage), KHÔNG đồng bộ.
    - Điền đầy đủ       → đăng nhập bằng email/mật khẩu & đồng bộ realtime mọi máy.
    ===================================================================== */
-
-const firebaseConfig = {
-  apiKey: "AIzaSyDLxMOrLoTTESWObxljwlyHxfNHVIBPdWU",
-  authDomain: "sdh-corsair.firebaseapp.com",
-  projectId: "sdh-corsair",
-  storageBucket: "sdh-corsair.firebasestorage.app",
-  messagingSenderId: "305598118383",
-  appId: "1:305598118383:web:aad634d6416d30d3235e1a"
+window.FIREBASE_CONFIG = {
+  apiKey: "",
+  authDomain: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
 };
-
-
 // Mã kho dữ liệu dùng chung cho cả công ty (mọi máy để GIỐNG NHAU):
 window.WORKSPACE_ID = "sdh-corsair";
 // Cho phép tự đăng ký tài khoản ở màn hình đăng nhập? (đặt false nếu chỉ Admin được tạo tài khoản)
-window.ALLOW_SELF_SIGNUP = false;
+window.ALLOW_SELF_SIGNUP = true;
 /* ⇧⇧⇧  HẾT PHẦN CẤU HÌNH  ⇧⇧⇧ */
 </script>
 
@@ -275,6 +272,10 @@ table.grid tbody tr.sel{background:var(--sel)!important;box-shadow:inset 3px 0 0
       <div class="gate-err" id="lg-err"></div>
       <div class="gate-switch" id="to-register" style="display:none">Chưa có tài khoản? <a onclick="showRegister(true)">Đăng ký ngay</a></div>
       <div class="gate-hint" id="login-hint">Mặc định: <b>admin</b> / <b>admin</b></div>
+      <div class="gate-hint" style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
+        <span id="sync-state"></span><br>
+        <a onclick="openFbSetup()">⚙️ Thiết lập đồng bộ nhiều máy (Firebase)</a>
+      </div>
     </div>
 
     <div id="form-register" style="display:none">
@@ -321,9 +322,20 @@ table.grid tbody tr.sel{background:var(--sel)!important;box-shadow:inset 3px 0 0
 
 /* ---------------- Data layer (Firebase Firestore hoặc localStorage) ---------------- */
 const KEY='sdh_data_v1';
+const CFG_KEY='sdh_fb_cfg';
 let DB=null, SES=null;
-const CLOUD = !!(window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && typeof firebase!=='undefined');
-const WORKSPACE_ID = window.WORKSPACE_ID || 'sdh-default';
+/* Cấu hình Firebase: ưu tiên đã ghi sẵn trong file, nếu không thì lấy bản đã lưu trong máy (nhập qua nút Thiết lập) */
+function resolveConfig(){
+  const inFile=window.FIREBASE_CONFIG;
+  if(inFile&&inFile.apiKey)return {cfg:inFile, ws:window.WORKSPACE_ID||'sdh-default'};
+  try{const s=JSON.parse(localStorage.getItem(CFG_KEY));
+    if(s&&s.cfg&&s.cfg.apiKey)return {cfg:s.cfg, ws:s.ws||window.WORKSPACE_ID||'sdh-default'};}catch(e){}
+  return {cfg:null, ws:window.WORKSPACE_ID||'sdh-default'};
+}
+const _R=resolveConfig();
+const ACTIVE_CFG=_R.cfg;
+const CLOUD = !!(ACTIVE_CFG && ACTIVE_CFG.apiKey && typeof firebase!=='undefined');
+const WORKSPACE_ID = _R.ws;
 const fb = {auth:null, db:null, ref:null, unsub:null, shown:false, saveT:null};
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
@@ -453,9 +465,46 @@ function logout(){
   backToLogin();
 }
 
+/* ----- Thiết lập Firebase ngay trong web (không cần sửa code) ----- */
+function parseFirebaseConfig(text){
+  if(!text)return null;
+  let t=text.trim();
+  const m=t.match(/\{[\s\S]*\}/);           // lấy phần { ... }
+  if(!m)return null;
+  try{const obj=(new Function('return ('+m[0]+')'))();
+    if(obj&&obj.apiKey&&obj.projectId)return obj;}catch(e){}
+  return null;
+}
+function openFbSetup(){
+  const saved=(()=>{try{return JSON.parse(localStorage.getItem(CFG_KEY))}catch(e){return null}})();
+  const curWs=(saved&&saved.ws)||window.WORKSPACE_ID||'sdh-corsair';
+  const bakedIn=!!(window.FIREBASE_CONFIG&&window.FIREBASE_CONFIG.apiKey);
+  const body=`
+    ${bakedIn?'<div style="background:var(--accent-soft);padding:10px;border-radius:6px;margin-bottom:12px;font-size:12.5px">✅ File này đã ghi sẵn cấu hình Firebase — mọi máy dùng file này đều tự đồng bộ.</div>':''}
+    <div class="fld"><label>Dán đoạn <b>firebaseConfig</b> (lấy ở Firebase → Project settings)</label>
+      <textarea id="fb-cfg" rows="9" placeholder="const firebaseConfig = {\n  apiKey: &quot;...&quot;,\n  authDomain: &quot;...&quot;,\n  projectId: &quot;...&quot;,\n  ...\n};" style="font-family:monospace;font-size:12px">${saved&&saved.cfg?esc(JSON.stringify(saved.cfg,null,2)):''}</textarea></div>
+    <div class="fld" style="margin-top:10px"><label>Mã kho dữ liệu chung (mọi máy để GIỐNG NHAU)</label>
+      <input id="fb-ws" value="${esc(curWs)}"></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Sau khi lưu, trang sẽ tải lại và chuyển sang đăng nhập bằng <b>Email</b>. Cần làm việc này trên <b>mỗi máy</b> (hoặc dán sẵn vào index.html để mọi máy tự có — xem FIREBASE.md).</div>`;
+  const bg=modal('Thiết lập đồng bộ (Firebase)',body,(bg)=>{
+    const cfg=parseFirebaseConfig(bg.querySelector('#fb-cfg').value);
+    if(!cfg){toast('Cấu hình không hợp lệ — cần có apiKey và projectId','err');return false}
+    const ws=bg.querySelector('#fb-ws').value.trim()||'sdh-corsair';
+    localStorage.setItem(CFG_KEY,JSON.stringify({cfg,ws}));
+    toast('Đã lưu cấu hình. Đang tải lại...','ok');
+    setTimeout(()=>location.reload(),700);
+  },'Lưu & Bật đồng bộ');
+  if(saved&&saved.cfg){
+    const f=bg.querySelector('.modal-f');
+    const del=document.createElement('button');del.className='btn danger sm';del.textContent='Xóa cấu hình';
+    del.onclick=()=>{localStorage.removeItem(CFG_KEY);toast('Đã xóa cấu hình, về chế độ lưu máy','ok');setTimeout(()=>location.reload(),600);};
+    f.insertBefore(del,f.firstChild);
+  }
+}
+
 /* ----- Firebase: khởi tạo, quan sát đăng nhập, đồng bộ realtime ----- */
 function initCloud(){
-  try{firebase.initializeApp(window.FIREBASE_CONFIG);}
+  try{firebase.initializeApp(ACTIVE_CFG);}
   catch(e){console.error(e);toast('Cấu hình Firebase lỗi: '+e.message,'err');return;}
   fb.auth=firebase.auth();
   fb.db=firebase.firestore();
@@ -567,7 +616,7 @@ function doRegister(){
 /* Admin tạo tài khoản NGAY TRONG APP mà không bị đăng xuất (dùng app phụ) */
 function adminCreateAccount(email,pass,name){
   let app;
-  try{app=firebase.app('secondary');}catch(e){app=firebase.initializeApp(window.FIREBASE_CONFIG,'secondary');}
+  try{app=firebase.app('secondary');}catch(e){app=firebase.initializeApp(ACTIVE_CFG,'secondary');}
   const a=app.auth();
   return a.createUserWithEmailAndPassword(email,pass)
     .then(cred=>name?cred.user.updateProfile({displayName:name}):null)
@@ -1277,12 +1326,14 @@ document.getElementById('rg-btn').onclick=doRegister;
 ['rg-name','rg-email','rg-pass','rg-pass2'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doRegister()}));
 window.addEventListener('DOMContentLoaded',()=>{
   const uEl=document.getElementById('lg-user'), pEl=document.getElementById('lg-pass');
+  const ss=document.getElementById('sync-state');
   if(CLOUD){
     document.getElementById('lbl-user').textContent='Email';
     uEl.placeholder='ban@congty.com';uEl.type='email';uEl.value='';pEl.value='';
     document.getElementById('login-hint').style.display='none';
     document.getElementById('gate-sub').textContent='Đăng nhập bằng email & mật khẩu';
     if(SELF_SIGNUP)document.getElementById('to-register').style.display='';
+    if(ss)ss.innerHTML='<b style="color:var(--accent)">☁️ Đồng bộ đám mây: BẬT</b> · kho: '+esc(WORKSPACE_ID);
     initCloud();
   }else{
     load();
@@ -1290,7 +1341,8 @@ window.addEventListener('DOMContentLoaded',()=>{
     const u=prev&&DB.users.find(x=>x.username===prev);
     if(u){uEl.value=u.username;pEl.value=u.password;}
     else{uEl.value='admin';pEl.value='admin';}
-    if(window.FIREBASE_CONFIG&&window.FIREBASE_CONFIG.apiKey&&typeof firebase==='undefined')
+    if(ss)ss.innerHTML='<b style="color:var(--warn)">💾 Chế độ Lưu máy</b> · dữ liệu chỉ ở máy này, <b>không đồng bộ</b>';
+    if(ACTIVE_CFG&&typeof firebase==='undefined')
       toast('Chưa tải được Firebase SDK (kiểm tra Internet) — đang chạy chế độ lưu máy','err');
   }
 });
