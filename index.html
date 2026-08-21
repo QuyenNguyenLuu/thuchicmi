@@ -272,10 +272,7 @@ table.grid tbody tr.sel{background:var(--sel)!important;box-shadow:inset 3px 0 0
       <div class="gate-err" id="lg-err"></div>
       <div class="gate-switch" id="to-register" style="display:none">Chưa có tài khoản? <a onclick="showRegister(true)">Đăng ký ngay</a></div>
       <div class="gate-hint" id="login-hint">Mặc định: <b>admin</b> / <b>admin</b></div>
-      <div class="gate-hint" style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
-        <span id="sync-state"></span><br>
-        <a onclick="openFbSetup()">⚙️ Thiết lập đồng bộ nhiều máy (Firebase)</a>
-      </div>
+      <div class="gate-hint" id="sync-state" style="margin-top:14px;display:none"></div>
     </div>
 
     <div id="form-register" style="display:none">
@@ -426,7 +423,7 @@ function revealApp(){
   const name=SES?SES.fullName:'';
   document.getElementById('who').textContent=name;
   document.getElementById('side-avatar').textContent=(name||'?').trim().charAt(0)||'?';
-  document.getElementById('side-mode').textContent=CLOUD?(SES&&SES.email?SES.email:'Đám mây'):'Chế độ lưu máy';
+  document.getElementById('side-mode').textContent=CLOUD?((SES&&SES.role==='admin'?'👑 Quản trị · ':'')+((SES&&SES.email)||'Đám mây')):'Chế độ lưu máy';
   const ws=document.getElementById('ws-badge');
   ws.textContent=CLOUD?('☁️ Đồng bộ · '+WORKSPACE_ID):'💾 Lưu trên máy';
   openView('home');
@@ -529,14 +526,38 @@ function startCloudSync(){
       return;
     }
     DB=normalizeDB(snap.data());
-    if(!fb.shown){fb.shown=true;revealApp();}
-    else softRerender();
+    const email=((SES&&SES.email)||'').toLowerCase();
+    let prof=DB.users.find(u=>(u.email||'').toLowerCase()===email);
+    if(!fb.shown){
+      if(!prof){
+        if(DB.users.length===0){       // người đầu tiên => Quản trị viên (admin sẵn)
+          prof={id:uid(),email:SES.email,name:SES.fullName,role:'admin',position:'',active:true};
+          DB.users.push(prof);save();
+          toast('Bạn là quản trị viên đầu tiên của hệ thống.','ok');
+        }else{                          // không có trong danh sách => từ chối
+          document.getElementById('lg-err').textContent='Tài khoản chưa được cấp quyền. Vui lòng liên hệ quản trị viên để được thêm.';
+          fb.auth.signOut();return;
+        }
+      }
+      if(prof.active===false){
+        document.getElementById('lg-err').textContent='Tài khoản của bạn đã bị khóa. Liên hệ quản trị viên.';
+        fb.auth.signOut();return;
+      }
+      SES.role=prof.role||'nhanvien';SES.fullName=prof.name||SES.fullName;SES.profileId=prof.id;
+      fb.shown=true;revealApp();
+    }else{
+      // đã vào app: nếu bị thu hồi quyền/khóa => đăng xuất
+      if(!prof||prof.active===false){toast('Tài khoản của bạn đã bị thu hồi quyền.','err');fb.auth.signOut();return;}
+      SES.role=prof.role||SES.role;SES.fullName=prof.name||SES.fullName;
+      softRerender();
+    }
   },err=>{
     console.error(err);
-    document.getElementById('lg-err').textContent='Lỗi Firestore: '+(err.message||err.code);
+    document.getElementById('lg-err').textContent='Lỗi Firestore: '+(err.message||err.code)+' (kiểm tra Security Rules)';
     toast('Lỗi Firestore: '+(err.message||err.code),'err');
   });
 }
+function isAdmin(){return CLOUD?(SES&&SES.role==='admin'):true;}
 /* cập nhật lại màn hình khi có thay đổi từ máy khác (không phá form đang nhập) */
 function softRerender(){
   if(document.querySelector('.modal-bg'))return;
@@ -1092,14 +1113,13 @@ function deleteFund(id){
 
 /* ---------------- USERS ---------------- */
 function renderUsers(el){
-  const cloudNote=CLOUD?`<div style="margin:0 0 16px;padding:14px 16px;background:var(--warn-soft);border:1px solid #e6cf9a;border-radius:var(--radius);font-size:13px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-    <div style="flex:1;min-width:220px">☁️ <b>Đang dùng Firebase Authentication.</b> Tài khoản đăng nhập được tạo & quản lý tại đây hoặc trong <b>Firebase Console → Authentication</b>. Danh sách phía dưới không dùng để đăng nhập ở chế độ đám mây.</div>
-    <button class="btn sm" onclick="cloudCreateUser()">＋ Tạo tài khoản đăng nhập</button></div>`:'';
+  if(CLOUD)return renderCloudUsers(el);
+  /* ----- LOCAL: quản lý người dùng đăng nhập (tên đăng nhập/mật khẩu) ----- */
   el.innerHTML=`
-  ${cloudNote}
   <div class="panel">
     <div class="panel-head"><span>NGƯỜI SỬ DỤNG</span>
-      <button class="btn sm" onclick="editUser()">＋ Thêm người dùng</button></div>
+      <div style="display:flex;gap:8px"><button class="btn sec sm" onclick="openFbSetup()">⚙️ Thiết lập đồng bộ</button>
+      <button class="btn sm" onclick="editUser()">＋ Thêm người dùng</button></div></div>
     <div class="box tbl-wrap">
       <table class="grid"><thead><tr><th>Tên đăng nhập</th><th>Họ tên</th><th class="center" style="width:150px">Thao tác</th></tr></thead>
       <tbody>${DB.users.map(u=>`<tr>
@@ -1118,7 +1138,7 @@ function editUser(id){const u=id?DB.users.find(x=>x.id===id):{};
     <div class="fld" style="margin-top:8px"><label>Mật khẩu</label><input id="us-p" value="${esc(u.password||'')}"></div>`;
   modal(id?'Sửa người dùng':'Thêm người dùng',body,bg=>{
     const un=bg.querySelector('#us-u').value.trim();if(!un){toast('Nhập tên đăng nhập','err');return false}
-    if(DB.users.some(x=>x.username.toLowerCase()===un.toLowerCase()&&x.id!==id)){toast('Tên đăng nhập đã tồn tại','err');return false}
+    if(DB.users.some(x=>x.username&&x.username.toLowerCase()===un.toLowerCase()&&x.id!==id)){toast('Tên đăng nhập đã tồn tại','err');return false}
     const data={username:un,fullName:bg.querySelector('#us-f').value.trim()||un,password:bg.querySelector('#us-p').value};
     if(id)Object.assign(u,data);else DB.users.push({id:uid(),...data});
     save();renderUsers(document.getElementById('v-'+ACTIVE));toast('Đã lưu','ok');});}
@@ -1127,6 +1147,116 @@ function deleteUser(id){
   if(SES&&DB.users.find(u=>u.id===id)?.username===SES.username){toast('Không thể xóa tài khoản đang đăng nhập','err');return}
   if(!confirmBox('Xóa người dùng này?'))return;
   DB.users=DB.users.filter(u=>u.id!==id);save();renderUsers(document.getElementById('v-'+ACTIVE));toast('Đã xóa','ok');}
+
+/* ================= CLOUD: quản lý nhân viên (Firebase Auth + hồ sơ) ================= */
+function roleLabel(r){return r==='admin'?'Quản trị viên':'Nhân viên';}
+function activeAdmins(){return DB.users.filter(u=>u.role==='admin'&&u.active!==false);}
+function refreshUsers(){renderUsers(document.getElementById('v-'+ACTIVE));}
+function renderCloudUsers(el){
+  const admin=isAdmin();
+  const rows=DB.users.slice().sort((a,b)=>(a.role==='admin'?0:1)-(b.role==='admin'?0:1));
+  const note=admin?'':`<div style="margin:0 0 14px;padding:12px 14px;background:var(--warn-soft);border:1px solid #e6cf9a;border-radius:var(--radius);font-size:13px">
+    👀 Bạn đang xem ở chế độ <b>Nhân viên</b>. Chỉ <b>Quản trị viên</b> mới thêm/sửa/xóa được người dùng.</div>`;
+  el.innerHTML=`
+  ${note}
+  <div class="panel">
+    <div class="panel-head"><span>NHÂN VIÊN / NGƯỜI DÙNG</span>
+      <div style="display:flex;gap:8px">
+        ${admin?`<button class="btn sec sm" onclick="openFbSetup()">⚙️ Thiết lập đồng bộ</button>
+        <button class="btn sm" onclick="addEmployee()">＋ Thêm nhân viên</button>`:''}
+      </div></div>
+    <div class="box tbl-wrap">
+      <table class="grid"><thead><tr>
+        <th>Họ và tên</th><th>Email đăng nhập</th><th>Vai trò</th><th>Chức vụ</th><th>Trạng thái</th>
+        ${admin?'<th class="center" style="width:210px">Thao tác</th>':''}
+      </tr></thead>
+      <tbody>${rows.length?rows.map(u=>{
+        const me=SES&&(u.email||'').toLowerCase()===(SES.email||'').toLowerCase();
+        return `<tr>
+        <td>${esc(u.name||'')}${me?' <span style="color:var(--muted)">(bạn)</span>':''}</td>
+        <td>${esc(u.email||'')}</td>
+        <td>${u.role==='admin'?'<b class="pos">Quản trị viên</b>':'Nhân viên'}</td>
+        <td>${esc(u.position||'')}</td>
+        <td>${u.active===false?'<span class="neg">Đã khóa</span>':'<span class="pos">Hoạt động</span>'}</td>
+        ${admin?`<td class="center">
+          <button class="icon-btn" title="Sửa" onclick="editEmployee('${u.id}')">✏️</button>
+          <button class="icon-btn" title="Gửi email đặt lại mật khẩu" onclick="resetEmployeePassword('${esc(u.email)}')">🔑</button>
+          <button class="icon-btn" title="${u.active===false?'Mở khóa':'Khóa'}" onclick="toggleEmployeeActive('${u.id}')">${u.active===false?'🔓':'🔒'}</button>
+          <button class="icon-btn" title="Xóa" onclick="deleteEmployee('${u.id}')">❌</button></td>`:''}
+      </tr>`}).join(''):`<tr><td colspan="${admin?6:5}" class="empty">Chưa có người dùng.</td></tr>`}
+      </tbody></table>
+    </div>
+  </div>`;
+}
+function addEmployee(){
+  if(!isAdmin())return;
+  const body=`
+    <div class="fld"><label>Họ và tên <span class="req">*</span></label><input id="ne-name" placeholder="Nguyễn Văn A"></div>
+    <div class="fld" style="margin-top:9px"><label>Email đăng nhập <span class="req">*</span></label><input id="ne-email" type="email" placeholder="nhanvien@congty.com"></div>
+    <div class="fld" style="margin-top:9px"><label>Mật khẩu <span class="req">*</span></label><input id="ne-pass" type="password" placeholder="ít nhất 6 ký tự"></div>
+    <div class="fld" style="margin-top:9px"><label>Vai trò</label><select id="ne-role"><option value="nhanvien">Nhân viên</option><option value="admin">Quản trị viên</option></select></div>
+    <div class="fld" style="margin-top:9px"><label>Chức vụ</label><input id="ne-pos" placeholder="(tùy chọn)"></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Sẽ tạo tài khoản đăng nhập trên Firebase và thêm vào danh sách. Bạn <b>không bị đăng xuất</b>.</div>`;
+  modal('Thêm nhân viên',body,bg=>{
+    const name=bg.querySelector('#ne-name').value.trim();
+    const email=bg.querySelector('#ne-email').value.trim();
+    const pass=bg.querySelector('#ne-pass').value;
+    const role=bg.querySelector('#ne-role').value;
+    const position=bg.querySelector('#ne-pos').value.trim();
+    if(!name||!email||!pass){toast('Nhập đủ họ tên, email, mật khẩu','err');return false}
+    if(pass.length<6){toast('Mật khẩu tối thiểu 6 ký tự','err');return false}
+    if(DB.users.some(u=>(u.email||'').toLowerCase()===email.toLowerCase())){toast('Email đã có trong danh sách','err');return false}
+    toast('Đang tạo tài khoản...','ok');
+    adminCreateAccount(email,pass,name).then(()=>{
+      DB.users.push({id:uid(),email,name,role,position,active:true});
+      save();refreshUsers();toast('Đã thêm nhân viên '+name,'ok');
+    }).catch(e=>toast(fbErr(e),'err'));
+  },'Tạo nhân viên');
+}
+function editEmployee(id){
+  if(!isAdmin())return;
+  const u=DB.users.find(x=>x.id===id);if(!u)return;
+  const body=`
+    <div class="fld"><label>Họ và tên</label><input id="ee-name" value="${esc(u.name||'')}"></div>
+    <div class="fld" style="margin-top:9px"><label>Email (không đổi được)</label><input value="${esc(u.email||'')}" disabled style="background:#f2f0ea"></div>
+    <div class="fld" style="margin-top:9px"><label>Vai trò</label><select id="ee-role">
+      <option value="nhanvien" ${u.role!=='admin'?'selected':''}>Nhân viên</option>
+      <option value="admin" ${u.role==='admin'?'selected':''}>Quản trị viên</option></select></div>
+    <div class="fld" style="margin-top:9px"><label>Chức vụ</label><input id="ee-pos" value="${esc(u.position||'')}"></div>`;
+  modal('Sửa thông tin nhân viên',body,bg=>{
+    const role=bg.querySelector('#ee-role').value;
+    if(u.role==='admin'&&role!=='admin'&&activeAdmins().length<=1){toast('Cần giữ ít nhất 1 quản trị viên','err');return false}
+    u.name=bg.querySelector('#ee-name').value.trim()||u.name;
+    u.role=role;u.position=bg.querySelector('#ee-pos').value.trim();
+    save();refreshUsers();toast('Đã cập nhật','ok');
+  },'Lưu');
+}
+function resetEmployeePassword(email){
+  if(!isAdmin())return;
+  if(!confirmBox('Gửi email đặt lại mật khẩu tới '+email+'?'))return;
+  fb.auth.sendPasswordResetEmail(email)
+    .then(()=>toast('Đã gửi email đặt lại mật khẩu cho '+email,'ok'))
+    .catch(e=>toast(fbErr(e),'err'));
+}
+function toggleEmployeeActive(id){
+  if(!isAdmin())return;
+  const u=DB.users.find(x=>x.id===id);if(!u)return;
+  const me=SES&&(u.email||'').toLowerCase()===(SES.email||'').toLowerCase();
+  if(me){toast('Không thể tự khóa tài khoản của mình','err');return}
+  if(u.active!==false&&u.role==='admin'&&activeAdmins().length<=1){toast('Cần giữ ít nhất 1 quản trị viên đang hoạt động','err');return}
+  u.active=(u.active===false);save();refreshUsers();
+  toast(u.active===false?'Đã khóa '+(u.name||u.email):'Đã mở khóa '+(u.name||u.email),'ok');
+}
+function deleteEmployee(id){
+  if(!isAdmin())return;
+  const u=DB.users.find(x=>x.id===id);if(!u)return;
+  const me=SES&&(u.email||'').toLowerCase()===(SES.email||'').toLowerCase();
+  if(me){toast('Không thể xóa tài khoản đang đăng nhập','err');return}
+  if(u.role==='admin'&&activeAdmins().length<=1){toast('Cần giữ ít nhất 1 quản trị viên','err');return}
+  if(!confirmBox('Xóa nhân viên "'+(u.name||u.email)+'" khỏi hệ thống?\\n\\nHọ sẽ không đăng nhập vào phần mềm được nữa.'))return;
+  DB.users=DB.users.filter(x=>x.id!==id);save();refreshUsers();
+  toast('Đã xóa. Lưu ý: xóa hẳn tài khoản Firebase thì làm trong Firebase Console → Authentication.','ok');
+}
 
 /* ---------------- COMPANY / PRINT TEMPLATE SETTINGS ---------------- */
 function renderCompany(el){
@@ -1326,14 +1456,12 @@ document.getElementById('rg-btn').onclick=doRegister;
 ['rg-name','rg-email','rg-pass','rg-pass2'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doRegister()}));
 window.addEventListener('DOMContentLoaded',()=>{
   const uEl=document.getElementById('lg-user'), pEl=document.getElementById('lg-pass');
-  const ss=document.getElementById('sync-state');
   if(CLOUD){
     document.getElementById('lbl-user').textContent='Email';
     uEl.placeholder='ban@congty.com';uEl.type='email';uEl.value='';pEl.value='';
     document.getElementById('login-hint').style.display='none';
     document.getElementById('gate-sub').textContent='Đăng nhập bằng email & mật khẩu';
     if(SELF_SIGNUP)document.getElementById('to-register').style.display='';
-    if(ss)ss.innerHTML='<b style="color:var(--accent)">☁️ Đồng bộ đám mây: BẬT</b> · kho: '+esc(WORKSPACE_ID);
     initCloud();
   }else{
     load();
@@ -1341,7 +1469,6 @@ window.addEventListener('DOMContentLoaded',()=>{
     const u=prev&&DB.users.find(x=>x.username===prev);
     if(u){uEl.value=u.username;pEl.value=u.password;}
     else{uEl.value='admin';pEl.value='admin';}
-    if(ss)ss.innerHTML='<b style="color:var(--warn)">💾 Chế độ Lưu máy</b> · dữ liệu chỉ ở máy này, <b>không đồng bộ</b>';
     if(ACTIVE_CFG&&typeof firebase==='undefined')
       toast('Chưa tải được Firebase SDK (kiểm tra Internet) — đang chạy chế độ lưu máy','err');
   }
