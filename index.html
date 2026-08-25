@@ -161,6 +161,13 @@ a:hover{text-decoration:underline}
 .add-inline{border:1px solid var(--line);background:#fff;color:var(--accent);width:38px;height:38px;border-radius:var(--radius);
   font-size:18px;font-weight:700;flex:0 0 auto}
 .add-inline:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.combo-list{display:none;position:absolute;left:0;right:0;top:100%;z-index:40;background:#fff;border:1px solid var(--accent);
+  border-radius:0 0 var(--radius) var(--radius);max-height:280px;overflow:auto;box-shadow:0 10px 26px rgba(0,0,0,.16)}
+.combo-item{padding:7px 11px;cursor:pointer;border-bottom:1px solid var(--line-soft);line-height:1.3}
+.combo-item:hover,.combo-item.active{background:var(--accent-soft)}
+.combo-item b{display:block;font-weight:600;font-size:13px}
+.combo-item span{font-size:11.5px;color:var(--muted)}
+.combo-empty{padding:12px;color:var(--muted);font-size:12.5px}
 .entry-actions{display:flex;flex-direction:column;justify-content:flex-start;gap:9px}
 
 /* tables */
@@ -234,13 +241,14 @@ table.grid tbody tr.sel{background:var(--sel)!important;box-shadow:inset 3px 0 0
 .v-form{text-align:right;font-size:9pt}
 .v-form b{font-size:10pt}
 .v-form i{display:block;font-size:8pt}
-.v-title{text-align:center;margin:6px 0 2px}
+.v-meta{display:inline-block;text-align:left;margin-top:6px;font-size:10.5pt;line-height:1.55}
+.v-meta u{text-decoration:none;border-bottom:1px dotted #000;display:inline-block;min-width:70px}
+.v-title{text-align:center;margin:2px 0}
 .v-title h2{margin:0;font-size:18pt;letter-spacing:1px}
 .v-title .date{font-style:italic;font-size:11pt}
-.v-no{text-align:right;font-size:11pt;margin-top:-30px}
-.v-rows{font-size:12pt;line-height:1.9;margin-top:10px}
+.v-rows{font-size:12pt;line-height:1.85;margin-top:8px}
 .v-rows .r{display:flex}
-.v-rows .r .lb{width:90px;flex:0 0 auto}
+.v-rows .r .lb{width:auto;flex:0 0 auto;padding-right:6px}
 .v-rows .r .vl{flex:1;font-weight:bold}
 .v-rows .r .vl.norm{font-weight:normal}
 .v-signdate{text-align:right;font-style:italic;font-size:11pt;margin:10px 0 4px}
@@ -296,6 +304,7 @@ table.grid tbody tr.sel{background:var(--sel)!important;box-shadow:inset 3px 0 0
     <div class="side-user"><div class="avatar" id="side-avatar">?</div>
       <div><div class="su-name" id="who"></div><div class="su-role" id="side-mode"></div></div></div>
     <nav class="side-nav" id="nav"></nav>
+    <button class="side-logout" onclick="changePassword()">🔑 Đổi mật khẩu</button>
     <button class="side-logout" onclick="logout()">⎋ Đăng xuất</button>
   </aside>
   <div class="main">
@@ -340,6 +349,7 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2
 function load(){ /* chỉ dùng cho chế độ LƯU MÁY */
   try{DB=JSON.parse(localStorage.getItem(KEY))}catch(e){DB=null}
   if(!DB){DB=seedData();saveLocal()}
+  ensureCompanyDefaults();
 }
 function saveLocal(){try{localStorage.setItem(KEY,JSON.stringify(DB))}catch(e){toast('Không lưu được (bộ nhớ trình duyệt bị chặn)','err')}}
 
@@ -526,6 +536,7 @@ function startCloudSync(){
       return;
     }
     DB=normalizeDB(snap.data());
+    ensureCompanyDefaults();
     const email=((SES&&SES.email)||'').toLowerCase();
     let prof=DB.users.find(u=>(u.email||'').toLowerCase()===email);
     if(!fb.shown){
@@ -545,6 +556,7 @@ function startCloudSync(){
       }
       SES.role=prof.role||'nhanvien';SES.fullName=prof.name||SES.fullName;SES.profileId=prof.id;
       fb.shown=true;revealApp();
+      if(prof.mustChange)setTimeout(()=>changePassword(true),350);
     }else{
       // đã vào app: nếu bị thu hồi quyền/khóa => đăng xuất
       if(!prof||prof.active===false){toast('Tài khoản của bạn đã bị thu hồi quyền.','err');fb.auth.signOut();return;}
@@ -558,6 +570,40 @@ function startCloudSync(){
   });
 }
 function isAdmin(){return CLOUD?(SES&&SES.role==='admin'):true;}
+function ensureCompanyDefaults(){
+  if(DB&&DB.company&&/15\/2006/.test(DB.company.formDecree||'')){
+    DB.company.formDecree='(Ban hành theo Thông tư số 200/2014/TT-BTC ngày 22/12/2014 của Bộ Tài chính)';
+    save();
+  }
+}
+function changePassword(force){
+  const body=(force?'<div style="background:var(--warn-soft);border:1px solid #e6cf9a;padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:12.5px">🔒 Đây là lần đăng nhập đầu tiên. Vui lòng đặt <b>mật khẩu mới</b> của riêng bạn để tiếp tục.</div>':'')
+    +'<div class="fld"><label>Mật khẩu mới</label><input id="pw-1" type="password" placeholder="ít nhất 6 ký tự"></div>'
+    +'<div class="fld" style="margin-top:9px"><label>Nhập lại mật khẩu mới</label><input id="pw-2" type="password"></div>';
+  const bg=modal(force?'Đổi mật khẩu (lần đầu)':'Đổi mật khẩu',body,b=>{
+    const p1=b.querySelector('#pw-1').value, p2=b.querySelector('#pw-2').value;
+    if(p1.length<6){toast('Mật khẩu tối thiểu 6 ký tự','err');return false;}
+    if(p1!==p2){toast('Nhập lại mật khẩu không khớp','err');return false;}
+    if(CLOUD){
+      const user=fb.auth.currentUser;
+      if(!user){toast('Phiên đăng nhập hết hạn, vui lòng đăng nhập lại','err');return true;}
+      user.updatePassword(p1).then(()=>{
+        const prof=DB.users.find(u=>(u.email||'').toLowerCase()===(SES.email||'').toLowerCase());
+        if(prof&&prof.mustChange){prof.mustChange=false;save();}
+        toast('Đã đổi mật khẩu thành công','ok');
+      }).catch(e=>{
+        const msg=(e&&e.code||'').includes('recent-login')?'Vui lòng đăng xuất và đăng nhập lại rồi đổi mật khẩu.':fbErr(e);
+        toast(msg,'err');
+        if(force)setTimeout(()=>changePassword(true),400);
+      });
+    }else{
+      const u=DB.users.find(x=>x.username===SES.username);if(u){u.password=p1;save();}
+      toast('Đã đổi mật khẩu','ok');
+    }
+  },'Lưu mật khẩu');
+  if(force){const x=bg.querySelector('#mx');if(x)x.style.display='none';}
+  return bg;
+}
 /* cập nhật lại màn hình khi có thay đổi từ máy khác (không phá form đang nhập) */
 function softRerender(){
   if(document.querySelector('.modal-bg'))return;
@@ -587,8 +633,11 @@ const NAV=[
   {s:'Danh mục',items:['incomeCat','expenseCat','funds']},
   {s:'Hệ thống',items:['users','company']},
 ];
+const ADMIN_VIEWS=['incomeCat','expenseCat','funds','users','company'];
+function viewAllowed(id){return isAdmin()||ADMIN_VIEWS.indexOf(id)<0;}
 function openView(id){
   if(!VIEWS[id])return;
+  if(!viewAllowed(id)){toast('Chức năng này chỉ dành cho quản trị viên','err');return;}
   ACTIVE=id;
   document.getElementById('tb-title').textContent=VIEWS[id].title;
   renderNav();renderContent();
@@ -597,10 +646,14 @@ function openView(id){
 }
 function renderNav(){
   const el=document.getElementById('nav');if(!el)return;
-  el.innerHTML=NAV.map(g=>'<div class="nav-sec">'+g.s+'</div>'+g.items.map(id=>{
-    const v=VIEWS[id];
-    return '<a class="nav-item '+(id===ACTIVE?'active':'')+'" onclick="openView(\''+id+'\')"><span class="ni">'+v.icon+'</span>'+v.title+'</a>';
-  }).join('')).join('');
+  el.innerHTML=NAV.map(g=>{
+    const items=g.items.filter(viewAllowed);
+    if(!items.length)return '';
+    return '<div class="nav-sec">'+g.s+'</div>'+items.map(id=>{
+      const v=VIEWS[id];
+      return '<a class="nav-item '+(id===ACTIVE?'active':'')+'" onclick="openView(\''+id+'\')"><span class="ni">'+v.icon+'</span>'+v.title+'</a>';
+    }).join('');
+  }).join('');
 }
 function renderContent(){
   const c=document.getElementById('content');
@@ -691,7 +744,7 @@ function renderHome(el){
     </div>
     <div class="home-cards">${cards.map(c=>`<div class="stat"><div class="lb">${c.lb}</div>
       <div class="vl ${c.cls||''}">${c.txt!=null?esc(c.txt):fmtMoney(c.vl)+' đ'}</div></div>`).join('')}</div>
-    <div class="home-grid">${tiles.map(x=>`<div class="tile ${x.accent?'accent':''}" onclick="openView('${x.v}')">
+    <div class="home-grid">${tiles.filter(x=>viewAllowed(x.v)).map(x=>`<div class="tile ${x.accent?'accent':''}" onclick="openView('${x.v}')">
       <div class="emoji">${x.e}</div><div class="t">${x.t}</div></div>`).join('')}</div>
   </div>`;
 }
@@ -748,7 +801,7 @@ function seedData(){
       name:'CT TNHH CORSAIR MARINE INTERNATIONAL',
       address:'SỐ 07 GÒ Ô MÔI, P. PHÚ THUẬN, TP.HCM',
       formNoReceipt:'01-TT',formNoPayment:'02-TT',
-      formDecree:'(Ban hành theo QĐ số 15/2006/QĐ-BTC ngày 20/03/2006 của Bộ Tài chính)',
+      formDecree:'(Ban hành theo Thông tư số 200/2014/TT-BTC ngày 22/12/2014 của Bộ Tài chính)',
       director:'Trần Lê Bảo Châu',chiefAccountant:'Nguyễn Lưu Quyền',
       cashier:'Nguyễn Lưu Quyền',preparer:'Nguyễn Trọng Tín'
     },
@@ -825,9 +878,12 @@ function renderVEntry(type){
 
     <div class="fld"><label>Số phiếu</label>
       <input id="${type}-code" value="${esc(code)}" style="background:#fdeede;font-weight:600"></div>
-    <div class="fld row"><div style="flex:1"><label>Họ &amp; Tên <span class="req">*</span></label>
-      <select id="${type}-obj" onchange="fillAddr('${type}')">
-        <option value="">--- Chọn đối tượng ---</option>${objOpts}</select></div>
+    <div class="fld row"><div class="combo-wrap" style="flex:1;position:relative"><label>Họ &amp; Tên <span class="req">*</span></label>
+      <input id="${type}-objsearch" autocomplete="off" placeholder="Gõ mã hoặc họ tên để tìm..."
+        value="${rec?esc(objName(rec.objId)):''}"
+        oninput="comboFilter('${type}')" onfocus="comboFilter('${type}')" onkeydown="comboKey('${type}',event)">
+      <input type="hidden" id="${type}-obj" value="${rec?rec.objId:''}">
+      <div class="combo-list" id="${type}-objlist"></div></div>
       <button class="add-inline" title="Thêm đối tượng" onclick="quickAddObject('${type}')">＋</button></div>
     <div class="fld"><label>Địa chỉ</label>
       <input id="${type}-addr" value="${rec?esc(objById(rec.objId)?.address||''):''}" placeholder="(tự động theo đối tượng)"></div>
@@ -849,6 +905,41 @@ function refreshVCode(type){const st=VSTATE[type];if(st.edit)return;
   document.getElementById(type+'-code').value=nextVoucherNo(c.prefix,c.list(),d);}
 function fillAddr(type){const o=objById(document.getElementById(type+'-obj').value);
   if(o)document.getElementById(type+'-addr').value=o.address||'';}
+/* ----- Combobox tìm đối tượng theo mã / họ tên ----- */
+function asciiFold(s){return (s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toLowerCase();}
+function comboFilter(type){
+  const q=asciiFold(document.getElementById(type+'-objsearch').value.trim());
+  const list=document.getElementById(type+'-objlist');if(!list)return;
+  let res=DB.objects;
+  if(q){
+    res=DB.objects.filter(o=>asciiFold(o.code).includes(q)||asciiFold(o.name).includes(q));
+    res=res.map(o=>{const c=asciiFold(o.code),n=asciiFold(o.name);
+      let s=5; if(c===q)s=0;else if(c.startsWith(q))s=1;else if(n.startsWith(q))s=2;else if(c.includes(q))s=3;else s=4;
+      return {o,s};}).sort((a,b)=>a.s-b.s).map(x=>x.o);
+  }
+  const total=res.length; res=res.slice(0,60);
+  if(!res.length){list.innerHTML='<div class="combo-empty">Không tìm thấy đối tượng. Bấm nút <b>+</b> để thêm mới.</div>';list.style.display='block';return;}
+  list.innerHTML=res.map(o=>`<div class="combo-item" data-id="${o.id}" onmousedown="comboPick('${type}','${o.id}')">
+    <b>${esc(o.name)}</b><span>${esc(o.code||'')}${o.address?' · '+esc(o.address):''}</span></div>`).join('')
+    +(total>60?`<div class="combo-empty">… còn ${total-60} kết quả, gõ thêm để thu hẹp.</div>`:'');
+  list.style.display='block';
+}
+function comboPick(type,id){
+  const o=objById(id);if(!o)return;
+  document.getElementById(type+'-obj').value=id;
+  document.getElementById(type+'-objsearch').value=o.name;
+  document.getElementById(type+'-addr').value=o.address||'';
+  const l=document.getElementById(type+'-objlist');if(l)l.style.display='none';
+}
+function comboKey(type,e){
+  if(e.key==='Enter'){const first=document.querySelector('#'+type+'-objlist .combo-item');
+    if(first){e.preventDefault();comboPick(type,first.dataset.id);}}
+  else if(e.key==='Escape'){const l=document.getElementById(type+'-objlist');if(l)l.style.display='none';}
+}
+document.addEventListener('mousedown',e=>{
+  if(!e.target.closest||!e.target.closest('.combo-wrap'))
+    document.querySelectorAll('.combo-list').forEach(l=>l.style.display='none');
+});
 function cancelVEdit(type){VSTATE[type].edit=null;renderVEntry(type);renderVTable(type);}
 
 function saveVoucher(type){
@@ -1050,9 +1141,7 @@ function quickAddObject(type){
       address:bg.querySelector('#qa-addr').value.trim(),phone:bg.querySelector('#qa-phone').value.trim(),
       fax:'',website:'',email:'',bank:'',bankAccount:'',note:''});
     save();
-    const sel=document.getElementById(type+'-obj');
-    if(sel){sel.innerHTML='<option value="">--- Chọn đối tượng ---</option>'+DB.objects.map(o=>`<option value="${o.id}">${esc(o.name)}</option>`).join('');
-      sel.value=id;fillAddr(type);}
+    if(document.getElementById(type+'-obj'))comboPick(type,id);
     toast('Đã thêm đối tượng','ok');
   },'Thêm');
 }
@@ -1234,7 +1323,7 @@ function addEmployee(){
     if(DB.users.some(u=>(u.email||'').toLowerCase()===email.toLowerCase())){toast('Email đã có trong danh sách','err');return false}
     toast('Đang tạo tài khoản...','ok');
     adminCreateAccount(email,pass,name).then(()=>{
-      DB.users.push({id:uid(),email,name,role,position,active:true});
+      DB.users.push({id:uid(),email,name,role,position,active:true,mustChange:true});
       save();refreshUsers();toast('Đã thêm nhân viên '+name,'ok');
     }).catch(e=>toast(fbErr(e),'err'));
   },'Tạo nhân viên');
@@ -1358,19 +1447,27 @@ function voucherPrintHTML(type,rec){
   const heading=isReceipt?'PHIẾU THU':'PHIẾU CHI';
   const formNo=isReceipt?co.formNoReceipt:co.formNoPayment;
   const reasonLbl=isReceipt?'Lý do nộp:':'Lý do chi:';
+  const nameLbl=isReceipt?'Họ và tên người nộp tiền:':'Họ và tên người nhận tiền:';
   const nguoiLbl=isReceipt?'Người nộp tiền':'Người nhận tiền';
   const bangChu=docSoThanhChu(rec.amount);
-  const recvLine=isReceipt?'Đã nhận đủ số tiền (viết bằng chữ):':'Đã nhận đủ số tiền (viết bằng chữ):';
+  const recvLine='Đã nhận đủ số tiền (viết bằng chữ):';
+  const dots='.'.repeat(60);
   const one=()=>`
   <div class="voucher">
     <div class="v-top">
       <div class="v-co">${esc(co.name)}<small>${esc(co.address)}</small></div>
-      <div class="v-form"><b>Mẫu số: ${esc(formNo)}</b><i>${esc(co.formDecree)}</i></div>
+      <div class="v-form"><b>Mẫu số: ${esc(formNo)}</b><i>${esc(co.formDecree)}</i>
+        <div class="v-meta">
+          <div>Quyển số: <u>&nbsp;</u></div>
+          <div>Số: <b>${esc(rec.code)}</b></div>
+          <div>Nợ: <u>&nbsp;</u></div>
+          <div>Có: <u>&nbsp;</u></div>
+        </div>
+      </div>
     </div>
     <div class="v-title"><h2>${heading}</h2><div class="date">${dateLine}</div></div>
-    <div class="v-no">Số: <b>${esc(rec.code)}</b></div>
     <div class="v-rows">
-      <div class="r"><span class="lb">Họ và tên:</span><span class="vl norm">${esc(o.name||'')}</span></div>
+      <div class="r"><span class="lb">${nameLbl}</span><span class="vl norm">${esc(o.name||'')}</span></div>
       <div class="r"><span class="lb">Địa chỉ:</span><span class="vl norm">${esc(o.address||'')}</span></div>
       <div class="r"><span class="lb">${reasonLbl}</span><span class="vl norm">${esc(rec.reason||'')}</span></div>
       <div class="r"><span class="lb">Số tiền:</span><span class="vl">${fmtMoney(rec.amount)} đ</span></div>
@@ -1386,6 +1483,8 @@ function voucherPrintHTML(type,rec){
       <div class="s"><b>Thủ quỹ</b><i>(Ký, họ tên)</i><div class="name">${esc(co.cashier)}</div></div>
     </div>
     <div class="v-recv">${recvLine} <i>${esc(bangChu)}./.</i></div>
+    <div class="v-recv">+ Tỷ giá ngoại tệ (vàng bạc, đá quý): ${dots}</div>
+    <div class="v-recv">+ Số tiền quy đổi: ${dots}</div>
   </div>`;
   return `<div class="a4">${one()}${one()}</div>`;
 }
