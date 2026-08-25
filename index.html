@@ -1497,12 +1497,12 @@ function printVoucher(type,id){
       <span style="opacity:.8;margin-left:8px">Bản in ${vcfg(type).title} — ${esc(rec.code)}</span>
     </div>${voucherPrintHTML(type,rec)}`;
   pa.style.display='block';
-  document.getElementById('app').style.visibility='hidden';
+  document.getElementById('app').style.display='none';
   window.scrollTo(0,0);
 }
 function closePrint(){
   const pa=document.getElementById('printArea');pa.style.display='none';pa.innerHTML='';
-  document.getElementById('app').style.visibility='visible';
+  document.getElementById('app').style.display='block';
 }
 
 /* ---------------- SỔ QUỸ (Cash book) ---------------- */
