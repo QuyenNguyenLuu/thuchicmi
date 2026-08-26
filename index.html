@@ -230,33 +230,33 @@ table.grid tbody tr.sel{background:var(--sel)!important;box-shadow:inset 3px 0 0
   body *{visibility:hidden}
   #printArea,#printArea *{visibility:visible}
   #printArea{display:block!important;position:absolute;inset:0;background:#fff}
-  @page{size:A4;margin:12mm}
+  @page{size:A4;margin:10mm}
 }
-.a4{width:186mm;margin:0 auto;color:#000;font-family:"Times New Roman",Times,serif}
-.voucher{padding-bottom:4mm}
+.a4{width:190mm;margin:0 auto;color:#000;font-family:"Times New Roman",Times,serif}
+.voucher{padding-bottom:2mm}
+.voucher + .voucher{border-top:1px dashed #999;margin-top:3mm;padding-top:3mm}
 .v-top{display:flex;justify-content:space-between;align-items:flex-start}
-.v-co{font-size:11pt;line-height:1.6}
+.v-co{font-size:10.5pt;line-height:1.4}
 .v-co b{font-weight:bold}
-.v-form{text-align:right;font-size:9pt}
+.v-form{text-align:right;font-size:8.5pt}
 .v-form b{font-size:10pt}
-.v-form i{display:block;font-size:8pt}
-.v-meta{display:inline-block;text-align:left;margin-top:6px;font-size:10.5pt;line-height:1.55}
+.v-form i{display:block;font-size:7.5pt}
+.v-meta{display:inline-block;text-align:left;margin-top:4px;font-size:10pt;line-height:1.45}
 .v-meta u{text-decoration:none;border-bottom:1px dotted #000;display:inline-block;min-width:70px}
-.v-title{text-align:center;margin:2px 0}
-.v-title h2{margin:0;font-size:18pt;letter-spacing:1px}
-.v-title .date{font-style:italic;font-size:11pt}
-.v-rows{font-size:12pt;line-height:1.85;margin-top:8px}
+.v-title{text-align:center;margin:1px 0}
+.v-title h2{margin:0;font-size:15pt;letter-spacing:1px}
+.v-title .date{font-style:italic;font-size:10.5pt}
+.v-rows{font-size:11pt;line-height:1.5;margin-top:5px}
 .v-rows .r{display:flex}
 .v-rows .r .lb{width:auto;flex:0 0 auto;padding-right:6px}
 .v-rows .r .vl{flex:1;font-weight:bold}
 .v-rows .r .vl.norm{font-weight:normal}
-.v-signdate{text-align:right;font-style:italic;font-size:11pt;margin:10px 0 4px}
-.v-signs{display:flex;justify-content:space-between;text-align:center;font-size:11pt;margin-top:4px}
+.v-signs{display:flex;justify-content:space-between;text-align:center;font-size:10.5pt;margin-top:4px}
 .v-signs .s{flex:1}
-.v-signs .s b{font-size:11pt}
-.v-signs .s i{display:block;font-size:9pt}
-.v-signs .s .name{margin-top:22mm;font-weight:normal}
-.v-recv{font-size:11pt;margin-top:10px}
+.v-signs .s b{font-size:10.5pt}
+.v-signs .s i{display:block;font-size:8.5pt}
+.v-signs .s .name{margin-top:13mm;font-weight:normal}
+.v-recv{font-size:10pt;line-height:1.5;margin-top:5px}
 .print-toolbar{background:#20353a;color:#fff;padding:10px 16px;display:flex;gap:10px;align-items:center;position:sticky;top:0}
 @media print{.print-toolbar{display:none}}
 </style>
@@ -1611,7 +1611,6 @@ function voucherPrintHTML(type,rec){
       </div>
       <div class="v-form"><b>Mẫu số ${esc(formNo)}</b><i>${esc(co.formDecree)}</i>
         <div class="v-meta">
-          <div>Quyển số: <u>&nbsp;</u></div>
           <div>Số: <b>${esc(rec.code)}</b></div>
           <div>Nợ: <u>&nbsp;</u></div>
           <div>Có: <u>&nbsp;</u></div>
@@ -1627,7 +1626,6 @@ function voucherPrintHTML(type,rec){
         &nbsp;&nbsp;<span class="lb">(Viết bằng chữ):</span> <i>${esc(bangChu)}./.</i></div>
       <div class="r"><span class="lb">Kèm theo:</span><span class="vl norm">${esc(rec.attachment||'..............')} Chứng từ gốc</span></div>
     </div>
-    <div class="v-signdate">${dateLine}</div>
     <div class="v-signs">
       <div class="s"><b>Giám đốc</b><i>(Ký, họ tên, đóng dấu)</i><div class="name">${esc(co.director)}</div></div>
       <div class="s"><b>Kế toán trưởng</b><i>(Ký, họ tên)</i><div class="name">${esc(co.chiefAccountant)}</div></div>
@@ -1639,7 +1637,7 @@ function voucherPrintHTML(type,rec){
     <div class="v-recv">+ Tỷ giá ngoại tệ (vàng bạc, đá quý): ${dots}</div>
     <div class="v-recv">+ Số tiền quy đổi: ${dots}</div>
   </div>`;
-  return `<div class="a4">${one()}</div>`;
+  return `<div class="a4">${one()}${one()}</div>`;
 }
 function printVoucher(type,id){
   const rec=vcfg(type).list().find(x=>x.id===id);if(!rec)return;
