@@ -235,12 +235,12 @@ table.grid tbody tr.sel{background:var(--sel)!important;box-shadow:inset 3px 0 0
 .a4{width:190mm;margin:0 auto;color:#000;font-family:"Times New Roman",Times,serif}
 .voucher{padding-bottom:2mm}
 .voucher + .voucher{border-top:1px dashed #999;margin-top:3mm;padding-top:3mm}
-.v-top{display:flex;justify-content:space-between;align-items:flex-start}
-.v-co{font-size:10.5pt;line-height:1.4}
+.v-top{display:flex;justify-content:space-between;align-items:flex-start;gap:6px}
+.v-co{font-size:9.5pt;line-height:1.4;white-space:nowrap}
 .v-co b{font-weight:bold}
-.v-form{text-align:right;font-size:8.5pt}
+.v-form{text-align:right;font-size:9pt;white-space:nowrap;flex:0 0 auto}
 .v-form b{font-size:10pt}
-.v-form i{display:block;font-size:7.5pt}
+.v-form i{display:block;font-size:6.5pt;white-space:nowrap}
 .v-meta{display:inline-block;text-align:left;margin-top:4px;font-size:10pt;line-height:1.45}
 .v-meta u{text-decoration:none;border-bottom:1px dotted #000;display:inline-block;min-width:70px}
 .v-title{text-align:center;margin:1px 0}
@@ -1622,8 +1622,8 @@ function voucherPrintHTML(type,rec){
       <div class="r"><span class="lb">${nameLbl}</span><span class="vl norm">${esc(o.name||'')}</span></div>
       <div class="r"><span class="lb">Địa chỉ:</span><span class="vl norm">${esc(o.address||'')}</span></div>
       <div class="r"><span class="lb">${reasonLbl}</span><span class="vl norm">${esc(rec.reason||'')}</span></div>
-      <div class="r" style="display:block"><span class="lb">Số tiền:</span> <b>${fmtMoneyCur(rec.amount,cdec)} ${esc(csym)}</b>
-        &nbsp;&nbsp;<span class="lb">(Viết bằng chữ):</span> <i>${esc(bangChu)}./.</i></div>
+      <div class="r"><span class="lb">Số tiền:</span><span class="vl">${fmtMoneyCur(rec.amount,cdec)} ${esc(csym)}</span></div>
+      <div class="r"><span class="lb">(Viết bằng chữ):</span><span class="vl norm"><i>${esc(bangChu)}./.</i></span></div>
       <div class="r"><span class="lb">Kèm theo:</span><span class="vl norm">${esc(rec.attachment||'..............')} Chứng từ gốc</span></div>
     </div>
     <div class="v-signs">
