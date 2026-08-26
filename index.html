@@ -349,7 +349,7 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2
 function load(){ /* chỉ dùng cho chế độ LƯU MÁY */
   try{DB=JSON.parse(localStorage.getItem(KEY))}catch(e){DB=null}
   if(!DB){DB=seedData();saveLocal()}
-  ensureCompanyDefaults();
+  ensureCompanyDefaults();ensureFundCurrencies();
 }
 function saveLocal(){try{localStorage.setItem(KEY,JSON.stringify(DB))}catch(e){toast('Không lưu được (bộ nhớ trình duyệt bị chặn)','err')}}
 
@@ -536,7 +536,7 @@ function startCloudSync(){
       return;
     }
     DB=normalizeDB(snap.data());
-    ensureCompanyDefaults();
+    ensureCompanyDefaults();ensureFundCurrencies();
     const email=((SES&&SES.email)||'').toLowerCase();
     let prof=DB.users.find(u=>(u.email||'').toLowerCase()===email);
     if(!fb.shown){
@@ -775,7 +775,7 @@ function seedData(){
   ];
   const incomeCat=['Nguồn thu khác','Rút quỹ','Thu PIT','Thu tạm ứng'].map(n=>({id:uid(),name:n}));
   const expenseCat=['Các khoản khác','Chi lương','Mua hàng','Tạm ứng'].map(n=>({id:uid(),name:n}));
-  const funds=[{id:fundId,name:'Quỹ tiền mặt',currency:'Việt Nam Đồng',initialAmount:35404459,note:'Cuối ngày 19-10'}];
+  const funds=[{id:fundId,name:'Quỹ tiền mặt',currency:'Việt Nam Đồng',currencyCode:'VND',symbol:'đ',read:'đồng',initialAmount:35404459,note:'Cuối ngày 19-10'}];
   const ec=(n)=>expenseCat.find(c=>c.name===n).id;
   const ic=(n)=>incomeCat.find(c=>c.name===n).id;
   const oId=(c)=>'o_'+c;
@@ -997,7 +997,7 @@ function renderVTable(type){
         <td>${esc(fundName(r.fundId))}</td>
         <td>${fmtDateTime(r.createdAt&&r.date===r.createdAt.slice(0,10)?r.createdAt:r.date)}</td>
         <td>${esc(cat.name||'')}</td>
-        <td class="num ${amtCls}">${fmtMoney(r.amount)} đ</td>
+        <td class="num ${amtCls}">${fmtMoney(r.amount)} ${esc(fundSymbol(r.fundId))}</td>
         <td>${esc(r.code)}</td>
         <td>${esc(o.name||'')}</td>
         <td>${esc(o.address||'')}</td>
@@ -1194,7 +1194,7 @@ function renderFunds(el){
         <th class="num">Đã Thu</th><th class="num">Đã Chi</th><th class="num">Còn lại</th><th>Ghi chú</th><th class="center">Thao tác</th>
       </tr></thead><tbody>${DB.funds.map(f=>{const s=fundStats(f.id);
         return `<tr>
-          <td>${esc(f.name)}</td><td>${esc(f.currency)}</td>
+          <td>${esc(f.name)}</td><td>${esc(f.currency)}${f.symbol?' <b>('+esc(f.symbol)+')</b>':''}</td>
           <td class="num">${fmtMoney(f.initialAmount)}</td>
           <td class="num pos">${fmtMoney(s.inc)}</td>
           <td class="num neg">${fmtMoney(s.exp)}</td>
@@ -1207,18 +1207,77 @@ function renderFunds(el){
     </div>
   </div>`;
 }
+/* ----- Danh mục đơn vị tiền tệ (ký hiệu + tên đọc bằng chữ) ----- */
+const CURRENCIES=[
+  {code:'VND',symbol:'đ',read:'đồng',name:'Việt Nam Đồng'},
+  {code:'USD',symbol:'USD',read:'đô la Mỹ',name:'Đô La Mỹ'},
+  {code:'EUR',symbol:'EUR',read:'euro',name:'Euro'},
+  {code:'THB',symbol:'THB',read:'bạt Thái',name:'Bạt Thái'},
+  {code:'AUD',symbol:'AUD',read:'đô la Úc',name:'Đô La Úc'},
+  {code:'GBP',symbol:'GBP',read:'bảng Anh',name:'Bảng Anh'},
+  {code:'JPY',symbol:'JPY',read:'yên Nhật',name:'Yên Nhật'},
+  {code:'CNY',symbol:'CNY',read:'nhân dân tệ',name:'Nhân Dân Tệ'},
+  {code:'SGD',symbol:'SGD',read:'đô la Singapore',name:'Đô La Singapore'},
+  {code:'KRW',symbol:'KRW',read:'won Hàn Quốc',name:'Won Hàn Quốc'},
+  {code:'MYR',symbol:'MYR',read:'ringgit Malaysia',name:'Ringgit Malaysia'},
+];
+function CUR(c){return CURRENCIES.find(x=>x.code===c)||CURRENCIES[0];}
+function inferCurrency(f){
+  const s=((f.currency||'')+' '+(f.name||'')).toLowerCase();
+  const has=k=>s.indexOf(k)>=0;
+  if(has('usd')||has('đô la mỹ')||has('do la my')||has('mỹ'))return CUR('USD');
+  if(has('eur')||has('euro'))return CUR('EUR');
+  if(has('thb')||has('thái')||has('thai')||has('bạt'))return CUR('THB');
+  if(has('aud')||has('úc')||has(' uc'))return CUR('AUD');
+  if(has('gbp')||has('bảng anh')||has('anh'))return CUR('GBP');
+  if(has('jpy')||has('nhật')||has('yên'))return CUR('JPY');
+  if(has('cny')||has('rmb')||has('nhân dân tệ')||has('trung'))return CUR('CNY');
+  if(has('sgd')||has('singapore'))return CUR('SGD');
+  if(has('krw')||has('hàn'))return CUR('KRW');
+  if(has('myr')||has('malaysia')||has('ringgit'))return CUR('MYR');
+  return CUR('VND');
+}
+function ensureFundCurrencies(){
+  let changed=false;
+  (DB.funds||[]).forEach(f=>{
+    if(!f.symbol||!f.read){const c=inferCurrency(f);
+      if(!f.symbol)f.symbol=c.symbol;if(!f.read)f.read=c.read;
+      if(!f.currencyCode)f.currencyCode=c.code;if(!f.currency)f.currency=c.name;changed=true;}
+  });
+  if(changed)save();
+}
+function fundSymbol(fundId){const f=(DB.funds||[]).find(x=>x.id===fundId);return (f&&f.symbol)||'đ';}
+function fundRead(fundId){const f=(DB.funds||[]).find(x=>x.id===fundId);return (f&&f.read)||'đồng';}
+function fundCurPick(){
+  const code=document.getElementById('fd-curcode').value;
+  const cc=CURRENCIES.find(x=>x.code===code);
+  if(cc){document.getElementById('fd-sym').value=cc.symbol;document.getElementById('fd-read').value=cc.read;
+    if(!document.getElementById('fd-name').value.trim())document.getElementById('fd-name').value=cc.code;}
+}
 function editFund(id){const f=id?DB.funds.find(x=>x.id===id):{};
+  const opts=CURRENCIES.map(c=>`<option value="${c.code}">${esc(c.name)} — ${esc(c.symbol)}</option>`).join('')
+    +'<option value="__custom">Khác (tự nhập)…</option>';
   const body=`
     <div class="fld"><label>Tên Quỹ/Tài khoản</label><input id="fd-name" value="${esc(f.name||'')}"></div>
-    <div class="fld" style="margin-top:8px"><label>Loại Tiền</label><input id="fd-cur" value="${esc(f.currency||'Việt Nam Đồng')}"></div>
+    <div class="fld" style="margin-top:8px"><label>Đơn vị tiền tệ</label>
+      <select id="fd-curcode" onchange="fundCurPick()">${opts}</select></div>
+    <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:10px;margin-top:8px">
+      <div class="fld"><label>Ký hiệu (in phiếu)</label><input id="fd-sym" value="${esc(f.symbol||'đ')}" placeholder="đ, USD…"></div>
+      <div class="fld"><label>Tên đọc bằng chữ</label><input id="fd-read" value="${esc(f.read||'đồng')}" placeholder="đồng, đô la Mỹ…"></div>
+    </div>
     <div class="fld" style="margin-top:8px"><label>Số Tiền ban đầu</label><input id="fd-init" value="${f.initialAmount!=null?fmtMoney(f.initialAmount):'0'}" oninput="this.value=fmtInput(this.value)"></div>
     <div class="fld" style="margin-top:8px"><label>Ghi chú</label><input id="fd-note" value="${esc(f.note||'')}"></div>`;
-  modal(id?'Sửa Quỹ/Tài khoản':'Thêm Quỹ/Tài khoản',body,bg=>{
+  const bg=modal(id?'Sửa Quỹ/Tài khoản':'Thêm Quỹ/Tài khoản',body,bg=>{
     const name=bg.querySelector('#fd-name').value.trim();if(!name){toast('Nhập tên quỹ','err');return false}
-    const data={name,currency:bg.querySelector('#fd-cur').value.trim(),
+    const code=bg.querySelector('#fd-curcode').value;const cc=CURRENCIES.find(x=>x.code===code);
+    const sym=bg.querySelector('#fd-sym').value.trim()||'đ';
+    const read=bg.querySelector('#fd-read').value.trim()||'đồng';
+    const data={name,currencyCode:code==='__custom'?'':code,
+      currency:(code==='__custom')?read:(cc?cc.name:''),symbol:sym,read:read,
       initialAmount:parseMoney(bg.querySelector('#fd-init').value),note:bg.querySelector('#fd-note').value.trim()};
     if(id)Object.assign(f,data);else DB.funds.push({id:uid(),...data});
-    save();renderFunds(document.getElementById('v-'+ACTIVE));toast('Đã lưu','ok');});}
+    save();renderFunds(document.getElementById('v-'+ACTIVE));toast('Đã lưu','ok');});
+  bg.querySelector('#fd-curcode').value=f.currencyCode||(id?inferCurrency(f).code:'VND');}
 function deleteFund(id){
   if(DB.funds.length<=1){toast('Cần giữ ít nhất 1 quỹ','err');return}
   const used=DB.receipts.some(r=>r.fundId===id)||DB.payments.some(p=>p.fundId===id);
@@ -1405,9 +1464,10 @@ function saveCompany(){
 }
 
 /* ---------------- ĐỌC SỐ THÀNH CHỮ (tiếng Việt) ---------------- */
-function docSoThanhChu(num){
+function docSoThanhChu(num,unit){
+  unit=unit||'đồng';
   num=Math.round(Number(num)||0);
-  if(num===0)return 'Không đồng';
+  if(num===0)return 'Không '+unit;
   const chu=['không','một','hai','ba','bốn','năm','sáu','bảy','tám','chín'];
   function doc3(n,full){
     let tram=Math.floor(n/100), chuc=Math.floor((n%100)/10), donvi=n%10, s='';
@@ -1434,7 +1494,7 @@ function docSoThanhChu(num){
   }
   out=out.trim();
   out=out.charAt(0).toUpperCase()+out.slice(1);
-  return out+' đồng';
+  return out+' '+unit;
 }
 
 /* ---------------- PRINT (A4) ---------------- */
@@ -1449,7 +1509,8 @@ function voucherPrintHTML(type,rec){
   const reasonLbl=isReceipt?'Lý do nộp:':'Lý do chi:';
   const nameLbl=isReceipt?'Họ và tên người nộp tiền:':'Họ và tên người nhận tiền:';
   const nguoiLbl=isReceipt?'Người nộp tiền':'Người nhận tiền';
-  const bangChu=docSoThanhChu(rec.amount);
+  const csym=fundSymbol(rec.fundId), cread=fundRead(rec.fundId);
+  const bangChu=docSoThanhChu(rec.amount,cread);
   const recvLine='Đã nhận đủ số tiền (viết bằng chữ):';
   const dots='.'.repeat(60);
   const one=()=>`
@@ -1470,7 +1531,7 @@ function voucherPrintHTML(type,rec){
       <div class="r"><span class="lb">${nameLbl}</span><span class="vl norm">${esc(o.name||'')}</span></div>
       <div class="r"><span class="lb">Địa chỉ:</span><span class="vl norm">${esc(o.address||'')}</span></div>
       <div class="r"><span class="lb">${reasonLbl}</span><span class="vl norm">${esc(rec.reason||'')}</span></div>
-      <div class="r"><span class="lb">Số tiền:</span><span class="vl">${fmtMoney(rec.amount)} đ</span></div>
+      <div class="r"><span class="lb">Số tiền:</span><span class="vl">${fmtMoney(rec.amount)} ${esc(csym)}</span></div>
       <div class="r"><span class="lb">Bằng chữ:</span><span class="vl norm"><i>${esc(bangChu)}./.</i></span></div>
       <div class="r"><span class="lb">Kèm theo:</span><span class="vl norm">${esc(rec.attachment||'..............')} chứng từ gốc</span></div>
     </div>
