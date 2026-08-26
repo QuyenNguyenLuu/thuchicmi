@@ -233,11 +233,10 @@ table.grid tbody tr.sel{background:var(--sel)!important;box-shadow:inset 3px 0 0
   @page{size:A4;margin:12mm}
 }
 .a4{width:186mm;margin:0 auto;color:#000;font-family:"Times New Roman",Times,serif}
-.voucher{padding-bottom:8mm;margin-bottom:8mm;border-bottom:1px dashed #999}
-.voucher:last-child{border-bottom:none}
+.voucher{padding-bottom:4mm}
 .v-top{display:flex;justify-content:space-between;align-items:flex-start}
-.v-co{font-weight:bold;font-size:13pt;text-transform:uppercase;line-height:1.35}
-.v-co small{display:block;font-size:9pt;font-weight:normal;text-transform:none}
+.v-co{font-size:11pt;line-height:1.6}
+.v-co b{font-weight:bold}
 .v-form{text-align:right;font-size:9pt}
 .v-form b{font-size:10pt}
 .v-form i{display:block;font-size:8pt}
@@ -392,6 +391,25 @@ function fbErr(e){
 function fmtMoney(n){n=Number(n)||0;return n.toLocaleString('vi-VN',{minimumFractionDigits:0,maximumFractionDigits:0})}
 function fmtMoney2(n){n=Number(n)||0;return n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
 function parseMoney(s){if(typeof s==='number')return s;const neg=/^\s*-/.test(String(s));const n=Number(String(s).replace(/[^\d]/g,''))||0;return neg?-n:n}
+/* Định dạng/nhập tiền theo số chữ số thập phân (dec): dec=0 kiểu VN (chấm ngăn nghìn), dec>0 kiểu quốc tế (phẩy nghìn, chấm thập phân) */
+function fmtMoneyCur(n,dec){n=Number(n)||0;dec=dec||0;
+  if(!dec)return n.toLocaleString('vi-VN',{minimumFractionDigits:0,maximumFractionDigits:0});
+  return n.toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec});}
+function parseAmount(s,dec){
+  if(typeof s==='number')return s;
+  dec=dec||0;let str=String(s).trim();const neg=/^-/.test(str);
+  str=str.replace(/[^\d.,]/g,'');
+  if(!dec){const n=Number(str.replace(/[^\d]/g,''))||0;return neg?-n:n;}
+  const lastDot=str.lastIndexOf('.'),lastCom=str.lastIndexOf(',');
+  const decPos=Math.max(lastDot,lastCom);
+  let val;
+  if(decPos>=0){const ip=str.slice(0,decPos).replace(/[.,]/g,''),fp=str.slice(decPos+1).replace(/[.,]/g,'');
+    val=Number((ip||'0')+'.'+(fp||'0'))||0;}
+  else{val=Number(str.replace(/[.,]/g,''))||0;}
+  const f=Math.pow(10,dec);val=Math.round(val*f)/f;
+  return neg?-val:val;
+}
+function fundDec(fundId){const f=(DB.funds||[]).find(x=>x.id===fundId);return (f&&f.dec)||0;}
 function pad(n,l){return String(n).padStart(l,'0')}
 function todayISO(){const d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1,2)+'-'+pad(d.getDate(),2)}
 function nowStamp(){const d=new Date();return d.toISOString()}
@@ -404,14 +422,20 @@ function toast(msg,type){const t=document.getElementById('toast');t.textContent=
 function confirmBox(msg){return window.confirm(msg)}
 
 /* auto voucher number: PREFIX-MMYYnnn (nnn = số thứ tự trong tháng) */
-function nextVoucherNo(prefix,list,dateISO){
+function fundPrefix(fund){return ((fund&&(fund.prefix||fund.currencyCode))||'VND').trim();}
+/* Số phiếu: <PREFIX>-<PVO|RVO>-MMYYnnn, nnn tăng dần RIÊNG theo từng quỹ */
+function nextVoucherNo(type,fundId,dateISO){
+  const c=vcfg(type);const tc=c.prefix; // PVO / RVO
+  const fund=(DB.funds||[]).find(f=>f.id===fundId)||{};
+  const pre=fundPrefix(fund);
   const d=new Date(dateISO||todayISO());
-  const mm=pad(d.getMonth()+1,2), yy=pad(d.getFullYear()%100,2);
-  const p=mm+yy;
+  const p=pad(d.getMonth()+1,2)+pad(d.getFullYear()%100,2);
   let max=0;
-  list.forEach(v=>{const m=(v.code||'').match(new RegExp('^'+prefix+'\\s*-\\s*'+p+'(\\d{3,})$'));
-    if(m){const n=parseInt(m[1],10);if(n>max)max=n}});
-  return prefix+' - '+p+pad(max+1,3);
+  c.list().filter(v=>v.fundId===fundId).forEach(v=>{
+    const m=(v.code||'').match(new RegExp('(?:^|[-\\s])'+tc+'\\s*-\\s*'+p+'(\\d{3,})$'));
+    if(m){const n=parseInt(m[1],10);if(n>max)max=n;}
+  });
+  return pre+'-'+tc+'-'+p+pad(max+1,3);
 }
 
 /* fund balance calc */
@@ -570,9 +594,15 @@ function startCloudSync(){
   });
 }
 function isAdmin(){return CLOUD?(SES&&SES.role==='admin'):true;}
+function myId(){return (SES&&(SES.email||SES.username||SES.fullName))||'';}
+function canEditVoucher(r){
+  if(isAdmin())return true;
+  if(r.createdById)return String(r.createdById).toLowerCase()===String(myId()).toLowerCase();
+  return (r.createdBy||'')===((SES&&SES.fullName)||''); // phiếu cũ: đối chiếu theo tên
+}
 function ensureCompanyDefaults(){
-  if(DB&&DB.company&&/15\/2006/.test(DB.company.formDecree||'')){
-    DB.company.formDecree='(Ban hành theo Thông tư số 200/2014/TT-BTC ngày 22/12/2014 của Bộ Tài chính)';
+  if(DB&&DB.company&&/15\/2006|200\/2014/.test(DB.company.formDecree||'')){
+    DB.company.formDecree='(Kèm theo Thông tư số 99/2025/TT-BTC ngày 27 tháng 10 năm 2025 của Bộ trưởng Bộ Tài chính)';
     save();
   }
 }
@@ -775,7 +805,7 @@ function seedData(){
   ];
   const incomeCat=['Nguồn thu khác','Rút quỹ','Thu PIT','Thu tạm ứng'].map(n=>({id:uid(),name:n}));
   const expenseCat=['Các khoản khác','Chi lương','Mua hàng','Tạm ứng'].map(n=>({id:uid(),name:n}));
-  const funds=[{id:fundId,name:'Quỹ tiền mặt',currency:'Việt Nam Đồng',currencyCode:'VND',symbol:'đ',read:'đồng',initialAmount:35404459,note:'Cuối ngày 19-10'}];
+  const funds=[{id:fundId,name:'Quỹ tiền mặt',prefix:'VND',currency:'Việt Nam Đồng',currencyCode:'VND',symbol:'đ',read:'đồng',dec:0,initialAmount:35404459,note:'Cuối ngày 19-10'}];
   const ec=(n)=>expenseCat.find(c=>c.name===n).id;
   const ic=(n)=>incomeCat.find(c=>c.name===n).id;
   const oId=(c)=>'o_'+c;
@@ -801,7 +831,7 @@ function seedData(){
       name:'CT TNHH CORSAIR MARINE INTERNATIONAL',
       address:'SỐ 07 GÒ Ô MÔI, P. PHÚ THUẬN, TP.HCM',
       formNoReceipt:'01-TT',formNoPayment:'02-TT',
-      formDecree:'(Ban hành theo Thông tư số 200/2014/TT-BTC ngày 22/12/2014 của Bộ Tài chính)',
+      formDecree:'(Kèm theo Thông tư số 99/2025/TT-BTC ngày 27 tháng 10 năm 2025 của Bộ trưởng Bộ Tài chính)',
       director:'Trần Lê Bảo Châu',chiefAccountant:'Nguyễn Lưu Quyền',
       cashier:'Nguyễn Lưu Quyền',preparer:'Nguyễn Trọng Tín'
     },
@@ -810,7 +840,7 @@ function seedData(){
 }
 
 /* ---------------- VOUCHER (Phiếu Thu / Phiếu Chi) ---------------- */
-const VSTATE={receipt:{filter:'year',edit:null,sel:null},payment:{filter:'year',edit:null,sel:null}};
+const VSTATE={receipt:{filter:'year',fund:'all',edit:null,sel:null},payment:{filter:'year',fund:'all',edit:null,sel:null}};
 function vcfg(type){
   return type==='receipt'
     ? {prefix:'RVO',list:()=>DB.receipts,cats:()=>DB.incomeCat,title:'Phiếu Thu',mng:'Quản lý Phiếu Thu',
@@ -831,6 +861,7 @@ function filteredVouchers(type){
   const st=VSTATE[type];const {from,to}=dateRange(st.filter);
   let rows=vcfg(type).list().slice();
   if(from)rows=rows.filter(r=>r.date>=from&&r.date<=to);
+  if(st.fund&&st.fund!=='all')rows=rows.filter(r=>r.fundId===st.fund);
   rows.sort((a,b)=>(a.date+a.code).localeCompare(b.date+b.code));
   return rows;
 }
@@ -846,6 +877,11 @@ function renderVoucher(type,el){
     <div class="box">
       <div class="filterbar">
         ${modes.map(m=>`<label><input type="radio" name="${type}-f" value="${m[0]}" ${st.filter===m[0]?'checked':''} onchange="setVFilter('${type}','${m[0]}')"> ${m[1]}</label>`).join('')}
+        <label style="margin-left:auto">Quỹ/Tài khoản:
+          <select onchange="setVFund('${type}',this.value)">
+            <option value="all" ${st.fund==='all'?'selected':''}>Tất cả</option>
+            ${DB.funds.map(f=>`<option value="${f.id}" ${st.fund===f.id?'selected':''}>${esc(f.name)}</option>`).join('')}
+          </select></label>
       </div>
       <div id="${type}-entry"></div>
       <div class="tbl-wrap" id="${type}-tbl"></div>
@@ -854,23 +890,25 @@ function renderVoucher(type,el){
   renderVEntry(type);renderVTable(type);
 }
 function setVFilter(type,mode){VSTATE[type].filter=mode;renderVoucher(type);}
+function setVFund(type,fid){VSTATE[type].fund=fid;renderVoucher(type);}
 
 function renderVEntry(type){
   const c=vcfg(type),st=VSTATE[type];
   const rec=st.edit?c.list().find(x=>x.id===st.edit):null;
   const wrap=document.getElementById(type+'-entry');
-  const code=rec?rec.code:nextVoucherNo(c.prefix,c.list(),todayISO());
+  const dfFund=rec?rec.fundId:(st.fund&&st.fund!=='all'?st.fund:(DB.funds[0]&&DB.funds[0].id));
+  const code=rec?rec.code:nextVoucherNo(type,dfFund,todayISO());
   const catOpts=c.cats().map(x=>`<option value="${x.id}" ${rec&&rec.catId===x.id?'selected':''}>${esc(x.name)}</option>`).join('');
   const objOpts=DB.objects.map(o=>`<option value="${o.id}" ${rec&&rec.objId===o.id?'selected':''}>${esc(o.name)}</option>`).join('');
-  const fundOpts=DB.funds.map(f=>`<option value="${f.id}" ${(rec?rec.fundId:DB.funds[0]&&DB.funds[0].id)===f.id?'selected':''}>${esc(f.name)}</option>`).join('');
+  const fundOpts=DB.funds.map(f=>`<option value="${f.id}" ${dfFund===f.id?'selected':''}>${esc(f.name)}</option>`).join('');
   wrap.innerHTML=`
   <div class="entry">
     <div class="fld"><label>${c.dateLbl} <span class="req">*</span></label>
       <input type="date" id="${type}-date" value="${rec?rec.date:todayISO()}" onchange="refreshVCode('${type}')"></div>
-    <div class="fld"><label>Số tiền <span class="req">*</span></label>
-      <input id="${type}-amount" inputmode="numeric" value="${rec?fmtMoney(rec.amount):''}" placeholder="0"
-        oninput="this.value=fmtInput(this.value)"></div>
-    <div class="fld"><label>Quỹ/Tài khoản</label><select id="${type}-fund">${fundOpts}</select></div>
+    <div class="fld"><label>Số tiền <span class="req">*</span> <b class="muted" id="${type}-cursym">${esc(fundSymbol(rec?rec.fundId:(DB.funds[0]&&DB.funds[0].id)))}</b></label>
+      <input id="${type}-amount" inputmode="decimal" value="${rec?fmtMoneyCur(rec.amount,fundDec(rec.fundId)):''}" placeholder="0"
+        oninput="onAmountInput('${type}')"></div>
+    <div class="fld"><label>Quỹ/Tài khoản</label><select id="${type}-fund" onchange="onFundChange('${type}')">${fundOpts}</select></div>
     <div class="entry-actions" style="grid-row:span 2">
       <button class="btn" onclick="saveVoucher('${type}')">${rec?'💾 Cập nhật':'＋ Thêm mới'}</button>
       ${rec?`<button class="btn sec sm" onclick="cancelVEdit('${type}')">Hủy sửa</button>`:''}
@@ -900,9 +938,28 @@ function renderVEntry(type){
   </div>`;
 }
 function fmtInput(v){const n=parseMoney(v);return n?fmtMoney(n):''}
+function onAmountInput(type){
+  const dec=fundDec(document.getElementById(type+'-fund').value);
+  const el=document.getElementById(type+'-amount');
+  if(dec>0){ // cho phép gõ số lẻ tự do, chỉ giữ chữ số, dấu . , và -
+    el.value=el.value.replace(/[^\d.,-]/g,'');
+  }else{
+    el.value=fmtInput(el.value); // tiền không lẻ: tự chấm ngăn nghìn
+  }
+}
+function onFundChange(type){
+  const fid=document.getElementById(type+'-fund').value;
+  const dec=fundDec(fid);
+  const el=document.getElementById(type+'-amount');
+  const cur=parseAmount(el.value,dec>0?dec:0); // đọc theo định dạng cũ (số hiện có)
+  el.value=cur?fmtMoneyCur(cur,dec):'';
+  const sym=document.getElementById(type+'-cursym');if(sym)sym.textContent=fundSymbol(fid);
+  refreshVCode(type); // đổi quỹ -> đổi tiền tố & số phiếu
+}
 function refreshVCode(type){const st=VSTATE[type];if(st.edit)return;
-  const c=vcfg(type);const d=document.getElementById(type+'-date').value;
-  document.getElementById(type+'-code').value=nextVoucherNo(c.prefix,c.list(),d);}
+  const d=document.getElementById(type+'-date').value;
+  const fid=document.getElementById(type+'-fund').value;
+  document.getElementById(type+'-code').value=nextVoucherNo(type,fid,d);}
 function fillAddr(type){const o=objById(document.getElementById(type+'-obj').value);
   if(o)document.getElementById(type+'-addr').value=o.address||'';}
 /* ----- Combobox tìm đối tượng theo mã / họ tên ----- */
@@ -945,7 +1002,8 @@ function cancelVEdit(type){VSTATE[type].edit=null;renderVEntry(type);renderVTabl
 function saveVoucher(type){
   const c=vcfg(type),st=VSTATE[type];
   const date=document.getElementById(type+'-date').value;
-  const amount=parseMoney(document.getElementById(type+'-amount').value);
+  const fundId=document.getElementById(type+'-fund').value;
+  const amount=parseAmount(document.getElementById(type+'-amount').value,fundDec(fundId));
   const objId=document.getElementById(type+'-obj').value;
   const catId=document.getElementById(type+'-cat').value;
   if(!date){toast('Vui lòng chọn ngày','err');return}
@@ -962,14 +1020,19 @@ function saveVoucher(type){
   };
   const list=c.list();
   if(st.edit){const r=list.find(x=>x.id===st.edit);Object.assign(r,data);st.edit=null;toast('Đã cập nhật '+c.title,'ok');}
-  else{list.push({id:uid(),createdBy:SES.fullName,createdAt:nowStamp(),...data});toast('Đã lưu '+c.title,'ok');}
+  else{list.push({id:uid(),createdBy:SES.fullName,createdById:myId(),createdAt:nowStamp(),...data});toast('Đã lưu '+c.title,'ok');}
   save();renderVoucher(type);
 }
-function editVoucher(type,id){VSTATE[type].edit=id;VSTATE[type].sel=id;
+function editVoucher(type,id){
+  const r=vcfg(type).list().find(x=>x.id===id);
+  if(r&&!canEditVoucher(r)){toast('Bạn chỉ được sửa phiếu do mình lập','err');return;}
+  VSTATE[type].edit=id;VSTATE[type].sel=id;
   renderVEntry(type);renderVTable(type);
   document.getElementById('v-'+ACTIVE).querySelector('.content')?.scrollTo(0,0);
   window.scrollTo(0,0);}
 function deleteVoucher(type,id){
+  const r=vcfg(type).list().find(x=>x.id===id);
+  if(r&&!canEditVoucher(r)){toast('Bạn chỉ được xóa phiếu do mình lập','err');return;}
   if(!confirmBox('Xóa phiếu này? Thao tác không thể hoàn tác.'))return;
   const c=vcfg(type);const list=c.list();const i=list.findIndex(x=>x.id===id);
   if(i>=0)list.splice(i,1);
@@ -992,24 +1055,28 @@ function renderVTable(type){
       <th class="num">Số tiền</th><th>Số phiếu</th><th>Họ &amp; Tên</th><th>Địa chỉ</th><th>Lý do</th>
       <th>Người lập</th><th class="center">Sửa</th><th class="center">Xóa</th><th class="center">In</th>
     </tr></thead>
-    <tbody>${rows.map(r=>{const o=objById(r.objId)||{};const cat=c.cats().find(x=>x.id===r.catId)||{};
+    <tbody>${rows.map(r=>{const o=objById(r.objId)||{};const cat=c.cats().find(x=>x.id===r.catId)||{};const ce=canEditVoucher(r);
       return `<tr class="${st.sel===r.id?'sel':''}" onclick="VSTATE['${type}'].sel='${r.id}';renderVTable('${type}')">
         <td>${esc(fundName(r.fundId))}</td>
         <td>${fmtDateTime(r.createdAt&&r.date===r.createdAt.slice(0,10)?r.createdAt:r.date)}</td>
         <td>${esc(cat.name||'')}</td>
-        <td class="num ${amtCls}">${fmtMoney(r.amount)} ${esc(fundSymbol(r.fundId))}</td>
+        <td class="num ${amtCls}">${fmtMoneyCur(r.amount,fundDec(r.fundId))} ${esc(fundSymbol(r.fundId))}</td>
         <td>${esc(r.code)}</td>
         <td>${esc(o.name||'')}</td>
         <td>${esc(o.address||'')}</td>
         <td>${esc(r.reason||'')}</td>
         <td>${esc(r.createdBy||'')}</td>
-        <td class="center"><button class="icon-btn" title="Sửa" onclick="event.stopPropagation();editVoucher('${type}','${r.id}')">✏️</button></td>
-        <td class="center"><button class="icon-btn" title="Xóa" onclick="event.stopPropagation();deleteVoucher('${type}','${r.id}')">❌</button></td>
+        <td class="center">${ce?`<button class="icon-btn" title="Sửa" onclick="event.stopPropagation();editVoucher('${type}','${r.id}')">✏️</button>`:'<span class="muted" title="Chỉ người lập được sửa">🔒</span>'}</td>
+        <td class="center">${ce?`<button class="icon-btn" title="Xóa" onclick="event.stopPropagation();deleteVoucher('${type}','${r.id}')">❌</button>`:'<span class="muted">—</span>'}</td>
         <td class="center"><button class="icon-btn" title="In" onclick="event.stopPropagation();printVoucher('${type}','${r.id}')">🖨️</button></td>
       </tr>`}).join('')}
     </tbody>
   </table>
-  <div class="totbar"><span>Tổng ${rows.length} phiếu:</span><b class="${amtCls}">${fmtMoney(tot)} đ</b></div>`;
+  <div class="totbar"><span>Tổng ${rows.length} phiếu:</span>${(()=>{
+    const codes=[...new Set(rows.map(r=>{const f=DB.funds.find(x=>x.id===r.fundId)||{};return f.currencyCode||f.symbol||'?';}))];
+    if(codes.length===1){const f=DB.funds.find(x=>x.id===rows[0].fundId)||{};return `<b class="${amtCls}">${fmtMoneyCur(tot,f.dec||0)} ${esc(f.symbol||'')}</b>`;}
+    return '<span class="muted">Nhiều loại tiền — chọn 1 quỹ để xem tổng</span>';
+  })()}</div>`;
 }
 
 /* ---------------- MODAL helper ---------------- */
@@ -1192,13 +1259,13 @@ function renderFunds(el){
       <table class="grid"><thead><tr>
         <th>Tên Quỹ/Tài khoản</th><th>Loại Tiền</th><th class="num">Số Tiền ban đầu</th>
         <th class="num">Đã Thu</th><th class="num">Đã Chi</th><th class="num">Còn lại</th><th>Ghi chú</th><th class="center">Thao tác</th>
-      </tr></thead><tbody>${DB.funds.map(f=>{const s=fundStats(f.id);
+      </tr></thead><tbody>${DB.funds.map(f=>{const s=fundStats(f.id);const dc=f.dec||0;
         return `<tr>
           <td>${esc(f.name)}</td><td>${esc(f.currency)}${f.symbol?' <b>('+esc(f.symbol)+')</b>':''}</td>
-          <td class="num">${fmtMoney(f.initialAmount)}</td>
-          <td class="num pos">${fmtMoney(s.inc)}</td>
-          <td class="num neg">${fmtMoney(s.exp)}</td>
-          <td class="num ${s.remain<0?'neg':'pos'}">${fmtMoney(s.remain)}</td>
+          <td class="num">${fmtMoneyCur(f.initialAmount,dc)}</td>
+          <td class="num pos">${fmtMoneyCur(s.inc,dc)}</td>
+          <td class="num neg">${fmtMoneyCur(s.exp,dc)}</td>
+          <td class="num ${s.remain<0?'neg':'pos'}">${fmtMoneyCur(s.remain,dc)}</td>
           <td>${esc(f.note||'')}</td>
           <td class="center">
             <button class="icon-btn" onclick="editFund('${f.id}')">✏️</button>
@@ -1209,17 +1276,17 @@ function renderFunds(el){
 }
 /* ----- Danh mục đơn vị tiền tệ (ký hiệu + tên đọc bằng chữ) ----- */
 const CURRENCIES=[
-  {code:'VND',symbol:'đ',read:'đồng',name:'Việt Nam Đồng'},
-  {code:'USD',symbol:'USD',read:'đô la Mỹ',name:'Đô La Mỹ'},
-  {code:'EUR',symbol:'EUR',read:'euro',name:'Euro'},
-  {code:'THB',symbol:'THB',read:'bạt Thái',name:'Bạt Thái'},
-  {code:'AUD',symbol:'AUD',read:'đô la Úc',name:'Đô La Úc'},
-  {code:'GBP',symbol:'GBP',read:'bảng Anh',name:'Bảng Anh'},
-  {code:'JPY',symbol:'JPY',read:'yên Nhật',name:'Yên Nhật'},
-  {code:'CNY',symbol:'CNY',read:'nhân dân tệ',name:'Nhân Dân Tệ'},
-  {code:'SGD',symbol:'SGD',read:'đô la Singapore',name:'Đô La Singapore'},
-  {code:'KRW',symbol:'KRW',read:'won Hàn Quốc',name:'Won Hàn Quốc'},
-  {code:'MYR',symbol:'MYR',read:'ringgit Malaysia',name:'Ringgit Malaysia'},
+  {code:'VND',symbol:'đ',read:'đồng',name:'Việt Nam Đồng',dec:0},
+  {code:'USD',symbol:'USD',read:'đô la Mỹ',name:'Đô La Mỹ',dec:2},
+  {code:'EUR',symbol:'EUR',read:'euro',name:'Euro',dec:2},
+  {code:'THB',symbol:'THB',read:'bạt Thái',name:'Bạt Thái',dec:2},
+  {code:'AUD',symbol:'AUD',read:'đô la Úc',name:'Đô La Úc',dec:2},
+  {code:'GBP',symbol:'GBP',read:'bảng Anh',name:'Bảng Anh',dec:2},
+  {code:'JPY',symbol:'JPY',read:'yên Nhật',name:'Yên Nhật',dec:0},
+  {code:'CNY',symbol:'CNY',read:'nhân dân tệ',name:'Nhân Dân Tệ',dec:2},
+  {code:'SGD',symbol:'SGD',read:'đô la Singapore',name:'Đô La Singapore',dec:2},
+  {code:'KRW',symbol:'KRW',read:'won Hàn Quốc',name:'Won Hàn Quốc',dec:0},
+  {code:'MYR',symbol:'MYR',read:'ringgit Malaysia',name:'Ringgit Malaysia',dec:2},
 ];
 function CUR(c){return CURRENCIES.find(x=>x.code===c)||CURRENCIES[0];}
 function inferCurrency(f){
@@ -1240,9 +1307,10 @@ function inferCurrency(f){
 function ensureFundCurrencies(){
   let changed=false;
   (DB.funds||[]).forEach(f=>{
-    if(!f.symbol||!f.read){const c=inferCurrency(f);
+    if(!f.symbol||!f.read||f.dec===undefined||!f.prefix){const c=inferCurrency(f);
       if(!f.symbol)f.symbol=c.symbol;if(!f.read)f.read=c.read;
-      if(!f.currencyCode)f.currencyCode=c.code;if(!f.currency)f.currency=c.name;changed=true;}
+      if(!f.currencyCode)f.currencyCode=c.code;if(!f.currency)f.currency=c.name;
+      if(f.dec===undefined)f.dec=c.dec;if(!f.prefix)f.prefix=f.currencyCode||c.code;changed=true;}
   });
   if(changed)save();
 }
@@ -1252,32 +1320,41 @@ function fundCurPick(){
   const code=document.getElementById('fd-curcode').value;
   const cc=CURRENCIES.find(x=>x.code===code);
   if(cc){document.getElementById('fd-sym').value=cc.symbol;document.getElementById('fd-read').value=cc.read;
+    document.getElementById('fd-dec').value=String(cc.dec);
     if(!document.getElementById('fd-name').value.trim())document.getElementById('fd-name').value=cc.code;}
 }
 function editFund(id){const f=id?DB.funds.find(x=>x.id===id):{};
   const opts=CURRENCIES.map(c=>`<option value="${c.code}">${esc(c.name)} — ${esc(c.symbol)}</option>`).join('')
     +'<option value="__custom">Khác (tự nhập)…</option>';
   const body=`
-    <div class="fld"><label>Tên Quỹ/Tài khoản</label><input id="fd-name" value="${esc(f.name||'')}"></div>
+    <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:10px">
+      <div class="fld"><label>Tên Quỹ/Tài khoản</label><input id="fd-name" value="${esc(f.name||'')}"></div>
+      <div class="fld"><label>Tiền tố số phiếu</label><input id="fd-prefix" value="${esc(f.prefix||f.currencyCode||'')}" placeholder="VD: VND, VC-VND"></div>
+    </div>
     <div class="fld" style="margin-top:8px"><label>Đơn vị tiền tệ</label>
       <select id="fd-curcode" onchange="fundCurPick()">${opts}</select></div>
-    <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:10px;margin-top:8px">
+    <div style="display:grid;grid-template-columns:1fr 1.4fr 0.9fr;gap:10px;margin-top:8px">
       <div class="fld"><label>Ký hiệu (in phiếu)</label><input id="fd-sym" value="${esc(f.symbol||'đ')}" placeholder="đ, USD…"></div>
       <div class="fld"><label>Tên đọc bằng chữ</label><input id="fd-read" value="${esc(f.read||'đồng')}" placeholder="đồng, đô la Mỹ…"></div>
+      <div class="fld"><label>Số lẻ (thập phân)</label><select id="fd-dec">
+        <option value="0">0</option><option value="2">2</option><option value="3">3</option></select></div>
     </div>
-    <div class="fld" style="margin-top:8px"><label>Số Tiền ban đầu</label><input id="fd-init" value="${f.initialAmount!=null?fmtMoney(f.initialAmount):'0'}" oninput="this.value=fmtInput(this.value)"></div>
+    <div class="fld" style="margin-top:8px"><label>Số Tiền ban đầu</label><input id="fd-init" value="${f.initialAmount!=null?fmtMoneyCur(f.initialAmount,f.dec||0):'0'}"></div>
     <div class="fld" style="margin-top:8px"><label>Ghi chú</label><input id="fd-note" value="${esc(f.note||'')}"></div>`;
   const bg=modal(id?'Sửa Quỹ/Tài khoản':'Thêm Quỹ/Tài khoản',body,bg=>{
     const name=bg.querySelector('#fd-name').value.trim();if(!name){toast('Nhập tên quỹ','err');return false}
     const code=bg.querySelector('#fd-curcode').value;const cc=CURRENCIES.find(x=>x.code===code);
     const sym=bg.querySelector('#fd-sym').value.trim()||'đ';
     const read=bg.querySelector('#fd-read').value.trim()||'đồng';
-    const data={name,currencyCode:code==='__custom'?'':code,
-      currency:(code==='__custom')?read:(cc?cc.name:''),symbol:sym,read:read,
-      initialAmount:parseMoney(bg.querySelector('#fd-init').value),note:bg.querySelector('#fd-note').value.trim()};
+    const dec=Number(bg.querySelector('#fd-dec').value)||0;
+    const prefix=(bg.querySelector('#fd-prefix').value.trim())||(cc?cc.code:code)||'VND';
+    const data={name,prefix,currencyCode:code==='__custom'?'':code,
+      currency:(code==='__custom')?read:(cc?cc.name:''),symbol:sym,read:read,dec:dec,
+      initialAmount:parseAmount(bg.querySelector('#fd-init').value,dec),note:bg.querySelector('#fd-note').value.trim()};
     if(id)Object.assign(f,data);else DB.funds.push({id:uid(),...data});
     save();renderFunds(document.getElementById('v-'+ACTIVE));toast('Đã lưu','ok');});
-  bg.querySelector('#fd-curcode').value=f.currencyCode||(id?inferCurrency(f).code:'VND');}
+  bg.querySelector('#fd-curcode').value=f.currencyCode||(id?inferCurrency(f).code:'VND');
+  bg.querySelector('#fd-dec').value=String(f.dec!=null?f.dec:(id?inferCurrency(f).dec:0));}
 function deleteFund(id){
   if(DB.funds.length<=1){toast('Cần giữ ít nhất 1 quỹ','err');return}
   const used=DB.receipts.some(r=>r.fundId===id)||DB.payments.some(p=>p.fundId===id);
@@ -1465,9 +1542,9 @@ function saveCompany(){
 
 /* ---------------- ĐỌC SỐ THÀNH CHỮ (tiếng Việt) ---------------- */
 function docSoThanhChu(num,unit){
-  unit=unit||'đồng';
+  if(unit===undefined)unit='đồng';
   num=Math.round(Number(num)||0);
-  if(num===0)return 'Không '+unit;
+  if(num===0)return ('Không '+unit).trim();
   const chu=['không','một','hai','ba','bốn','năm','sáu','bảy','tám','chín'];
   function doc3(n,full){
     let tram=Math.floor(n/100), chuc=Math.floor((n%100)/10), donvi=n%10, s='';
@@ -1496,6 +1573,17 @@ function docSoThanhChu(num,unit){
   out=out.charAt(0).toUpperCase()+out.slice(1);
   return out+' '+unit;
 }
+/* đọc tiền có phần thập phân: "Hai nghìn phẩy năm không đô la Mỹ" */
+function docTien(amount,unit,dec){
+  amount=Number(amount)||0;dec=dec||0;
+  if(!dec)return docSoThanhChu(Math.round(amount),unit);
+  const f=Math.pow(10,dec);const total=Math.round(amount*f);
+  const intp=Math.floor(total/f), frac=total-intp*f;
+  if(frac<=0)return docSoThanhChu(intp,unit);
+  const digs=['không','một','hai','ba','bốn','năm','sáu','bảy','tám','chín'];
+  const fracWords=String(frac).padStart(dec,'0').split('').map(d=>digs[+d]).join(' ');
+  return docSoThanhChu(intp,'').trim()+' phẩy '+fracWords+' '+unit;
+}
 
 /* ---------------- PRINT (A4) ---------------- */
 function voucherPrintHTML(type,rec){
@@ -1509,15 +1597,19 @@ function voucherPrintHTML(type,rec){
   const reasonLbl=isReceipt?'Lý do nộp:':'Lý do chi:';
   const nameLbl=isReceipt?'Họ và tên người nộp tiền:':'Họ và tên người nhận tiền:';
   const nguoiLbl=isReceipt?'Người nộp tiền':'Người nhận tiền';
+  const cdec=fundDec(rec.fundId);
   const csym=fundSymbol(rec.fundId), cread=fundRead(rec.fundId);
-  const bangChu=docSoThanhChu(rec.amount,cread);
+  const bangChu=docTien(rec.amount,cread,cdec);
   const recvLine='Đã nhận đủ số tiền (viết bằng chữ):';
-  const dots='.'.repeat(60);
+  const dots='.'.repeat(50);
   const one=()=>`
   <div class="voucher">
     <div class="v-top">
-      <div class="v-co">${esc(co.name)}<small>${esc(co.address)}</small></div>
-      <div class="v-form"><b>Mẫu số: ${esc(formNo)}</b><i>${esc(co.formDecree)}</i>
+      <div class="v-co">
+        <div>Đơn vị: <b>${esc(co.name)}</b></div>
+        <div>Địa chỉ: ${esc(co.address)}</div>
+      </div>
+      <div class="v-form"><b>Mẫu số ${esc(formNo)}</b><i>${esc(co.formDecree)}</i>
         <div class="v-meta">
           <div>Quyển số: <u>&nbsp;</u></div>
           <div>Số: <b>${esc(rec.code)}</b></div>
@@ -1531,23 +1623,23 @@ function voucherPrintHTML(type,rec){
       <div class="r"><span class="lb">${nameLbl}</span><span class="vl norm">${esc(o.name||'')}</span></div>
       <div class="r"><span class="lb">Địa chỉ:</span><span class="vl norm">${esc(o.address||'')}</span></div>
       <div class="r"><span class="lb">${reasonLbl}</span><span class="vl norm">${esc(rec.reason||'')}</span></div>
-      <div class="r"><span class="lb">Số tiền:</span><span class="vl">${fmtMoney(rec.amount)} ${esc(csym)}</span></div>
-      <div class="r"><span class="lb">Bằng chữ:</span><span class="vl norm"><i>${esc(bangChu)}./.</i></span></div>
-      <div class="r"><span class="lb">Kèm theo:</span><span class="vl norm">${esc(rec.attachment||'..............')} chứng từ gốc</span></div>
+      <div class="r" style="display:block"><span class="lb">Số tiền:</span> <b>${fmtMoneyCur(rec.amount,cdec)} ${esc(csym)}</b>
+        &nbsp;&nbsp;<span class="lb">(Viết bằng chữ):</span> <i>${esc(bangChu)}./.</i></div>
+      <div class="r"><span class="lb">Kèm theo:</span><span class="vl norm">${esc(rec.attachment||'..............')} Chứng từ gốc</span></div>
     </div>
     <div class="v-signdate">${dateLine}</div>
     <div class="v-signs">
       <div class="s"><b>Giám đốc</b><i>(Ký, họ tên, đóng dấu)</i><div class="name">${esc(co.director)}</div></div>
       <div class="s"><b>Kế toán trưởng</b><i>(Ký, họ tên)</i><div class="name">${esc(co.chiefAccountant)}</div></div>
-      <div class="s"><b>${nguoiLbl}</b><i>(Ký, họ tên)</i><div class="name">${esc(o.name||'')}</div></div>
-      <div class="s"><b>Người lập phiếu</b><i>(Ký, họ tên)</i><div class="name">${esc((rec.createdBy)||(SES&&SES.fullName)||co.preparer)}</div></div>
       <div class="s"><b>Thủ quỹ</b><i>(Ký, họ tên)</i><div class="name">${esc(co.cashier)}</div></div>
+      <div class="s"><b>Người lập phiếu</b><i>(Ký, họ tên)</i><div class="name">${esc((rec.createdBy)||(SES&&SES.fullName)||co.preparer)}</div></div>
+      <div class="s"><b>${nguoiLbl}</b><i>(Ký, họ tên)</i><div class="name">${esc(o.name||'')}</div></div>
     </div>
     <div class="v-recv">${recvLine} <i>${esc(bangChu)}./.</i></div>
     <div class="v-recv">+ Tỷ giá ngoại tệ (vàng bạc, đá quý): ${dots}</div>
     <div class="v-recv">+ Số tiền quy đổi: ${dots}</div>
   </div>`;
-  return `<div class="a4">${one()}${one()}</div>`;
+  return `<div class="a4">${one()}</div>`;
 }
 function printVoucher(type,id){
   const rec=vcfg(type).list().find(x=>x.id===id);if(!rec)return;
@@ -1585,22 +1677,23 @@ function drawCashbook(){
   DB.receipts.filter(r=>r.fundId===fundId).forEach(r=>evts.push({date:r.date,code:r.code,reason:r.reason,thu:r.amount,chi:0,createdAt:r.createdAt}));
   DB.payments.filter(p=>p.fundId===fundId).forEach(p=>evts.push({date:p.date,code:p.code,reason:p.reason,thu:0,chi:p.amount,createdAt:p.createdAt}));
   evts.sort((a,b)=>(a.date+(a.createdAt||'')).localeCompare(b.date+(b.createdAt||'')));
+  const dc=(f&&f.dec)||0;
   let bal=Number(f.initialAmount||0);let totThu=0,totChi=0;
   const rows=evts.map(e=>{bal+=e.thu-e.chi;totThu+=e.thu;totChi+=e.chi;
     return `<tr>
       <td>${fmtDate(e.date)}</td><td>${esc(e.code)}</td><td>${esc(e.reason||'')}</td>
-      <td class="num pos">${e.thu?fmtMoney(e.thu):''}</td>
-      <td class="num neg">${e.chi?fmtMoney(e.chi):''}</td>
-      <td class="num ${bal<0?'neg':''}">${fmtMoney(bal)}</td></tr>`}).join('');
+      <td class="num pos">${e.thu?fmtMoneyCur(e.thu,dc):''}</td>
+      <td class="num neg">${e.chi?fmtMoneyCur(e.chi,dc):''}</td>
+      <td class="num ${bal<0?'neg':''}">${fmtMoneyCur(bal,dc)}</td></tr>`}).join('');
   document.getElementById('cb-body').innerHTML=`
     <table class="grid"><thead><tr>
       <th>Ngày</th><th>Số phiếu</th><th>Diễn giải</th><th class="num">Thu</th><th class="num">Chi</th><th class="num">Tồn quỹ</th>
     </tr></thead><tbody>
-      <tr style="font-style:italic;background:#eef7f0"><td colspan="5">Số dư đầu kỳ</td><td class="num">${fmtMoney(f.initialAmount)}</td></tr>
+      <tr style="font-style:italic;background:#eef7f0"><td colspan="5">Số dư đầu kỳ</td><td class="num">${fmtMoneyCur(f.initialAmount,dc)}</td></tr>
       ${rows||''}
       <tr style="font-weight:700;background:var(--green-l)"><td colspan="3">Cộng phát sinh</td>
-        <td class="num pos">${fmtMoney(totThu)}</td><td class="num neg">${fmtMoney(totChi)}</td>
-        <td class="num ${bal<0?'neg':'pos'}">${fmtMoney(bal)}</td></tr>
+        <td class="num pos">${fmtMoneyCur(totThu,dc)}</td><td class="num neg">${fmtMoneyCur(totChi,dc)}</td>
+        <td class="num ${bal<0?'neg':'pos'}">${fmtMoneyCur(bal,dc)}</td></tr>
     </tbody></table>`;
 }
 
